@@ -110,7 +110,10 @@ jobs:
     name: Test Image
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    # Disabled for initial deployment - will be enabled after v1.0.0 is published
+    # To enable: change 'false' to 'true' or remove this line after first successful release
+    if: false && github.event_name != 'pull_request'
+    # Alternative condition (when ready): if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v')
     
     steps:
       - name: Checkout repository
