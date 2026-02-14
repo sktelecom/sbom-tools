@@ -25,14 +25,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-# Single JDK: Java 17 LTS (removed JDK 8, 11, 21)
-# JDK 17 can analyze projects built with Java 7-17
+# Single JDK: Java 17 LTS
 RUN mkdir -p /etc/apt/keyrings \
     && wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | tee /etc/apt/keyrings/adoptium.asc \
     && echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | tee /etc/apt/sources.list.d/adoptium.list \
     && apt-get update && apt-get install -y --no-install-recommends \
     temurin-17-jdk \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/lib/jvm/temurin-17-jdk-* /usr/lib/jvm/default-jvm
 
 # Maven & Gradle (lightweight installation)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -73,7 +73,7 @@ RUN npm install -g @cyclonedx/cdxgen@latest \
 
 # Environment variables
 ENV PATH="/root/.cargo/bin:${PATH}"
-ENV JAVA_HOME="/usr/lib/jvm/temurin-17-jdk-$(dpkg --print-architecture)"
+ENV JAVA_HOME="/usr/lib/jvm/default-jvm"
 
 # Copy entrypoint script
 COPY entrypoint.sh /usr/local/bin/run-scan
