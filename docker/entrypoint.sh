@@ -29,6 +29,15 @@ if [ -z "$JAVA_HOME" ]; then
     else
         echo "[WARN] Java not found. Java projects may fail."
     fi
+else
+    echo "[INFO] JAVA_HOME already set: $JAVA_HOME"
+fi
+
+# Verify JAVA_HOME is valid
+if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+    echo "[INFO] Java verified: $($JAVA_HOME/bin/java -version 2>&1 | head -n 1)"
+else
+    echo "[WARN] JAVA_HOME is set but java binary not found at: $JAVA_HOME/bin/java"
 fi
 
 # Validate required environment variables
@@ -170,6 +179,23 @@ EOF
         if [ -f "composer.json" ] && command -v composer >/dev/null 2>&1; then
             echo "[INFO] Found composer.json. Installing PHP dependencies..."
             composer install --quiet --no-interaction 2>&1 | grep -i error || true
+        fi
+        
+        # Handle Java Maven pom.xml
+        if [ -f "pom.xml" ] && command -v mvn >/dev/null 2>&1; then
+            echo "[INFO] Found pom.xml. Downloading Maven dependencies..."
+            mvn dependency:resolve dependency:resolve-plugins -q 2>&1 | grep -iE 'error|failure' || true
+        fi
+        
+        # Handle Java Gradle build.gradle
+        if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            if [ -x "./gradlew" ]; then
+                echo "[INFO] Found Gradle project. Downloading dependencies..."
+                ./gradlew dependencies --quiet 2>&1 | grep -iE 'error|failure' || true
+            elif command -v gradle >/dev/null 2>&1; then
+                echo "[INFO] Found Gradle project. Downloading dependencies..."
+                gradle dependencies --quiet 2>&1 | grep -iE 'error|failure' || true
+            fi
         fi
         
         # Handle Rust Cargo.toml
