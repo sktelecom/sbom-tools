@@ -53,6 +53,32 @@ SBOM Tools의 전체 시스템 구조, 컴포넌트 설계, 데이터 흐름 및
                            ▼
                 CycloneDX 1.4 SBOM (.json)
 ```
+## 아키텍처 개요
+
+```mermaid
+graph TB
+    User[User] -->|executes| Script[scan-sbom.sh/bat]
+    Script -->|runs| Docker[Docker Container]
+    Docker -->|contains| Entrypoint[entrypoint.sh]
+    
+    subgraph "Docker Container"
+        Entrypoint -->|detects| Mode{Scan Mode}
+        Mode -->|SOURCE| CDXGen[cdxgen]
+        Mode -->|IMAGE| Syft[syft]
+        Mode -->|BINARY| Syft
+        Mode -->|ROOTFS| Syft
+        
+        CDXGen -->|generates| SBOM[SBOM File]
+        Syft -->|generates| SBOM
+    end
+    
+    SBOM -->|outputs| Host[Host Filesystem]
+    SBOM -.->|optional| Upload[Dependency Track]
+    
+    style Docker fill:#e1f5ff
+    style SBOM fill:#c8e6c9
+```
+
 
 ## 컴포넌트 상세
 
@@ -128,6 +154,100 @@ CycloneDX JSON 생성
     │
     ▼
 {ProjectName}_{Version}_bom.json
+```
+
+## 파이프라인 흐름
+
+### 1. 사용자 호출
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant S as scan-sbom.sh
+    participant D as Docker Daemon
+    participant C as Container
+    
+    U->>S: ./scan-sbom.sh --project App --version 1.0
+    S->>S: Parse arguments
+    S->>S: Detect scan mode
+    S->>S: Configure volumes
+    S->>D: docker run with parameters
+    D->>C: Start container
+    C->>C: Execute entrypoint.sh
+```
+
+### 2. 소스 코드 분석 흐름
+
+```mermaid
+flowchart TD
+    Start([entrypoint.sh starts]) --> CheckMode{Scan Mode?}
+    
+    CheckMode -->|SOURCE| CheckDir[Check /src directory]
+    CheckDir --> DetectLang[Detect languages]
+    
+    DetectLang --> Python{Python?}
+    Python -->|Yes| InstallPy[pip install -r requirements.txt]
+    Python -->|No| Maven
+    
+    Maven{Maven?}
+    Maven -->|Yes| ResolveMvn[mvn dependency:resolve]
+    Maven -->|No| Gradle
+    
+    Gradle{Gradle?}
+    Gradle -->|Yes| ResolveGradle[gradle dependencies]
+    Gradle -->|No| Ruby
+    
+    Ruby{Ruby?}
+    Ruby -->|Yes| BundleInstall[bundle install]
+    Ruby -->|No| PHP
+    
+    PHP{PHP?}
+    PHP -->|Yes| ComposerInstall[composer install]
+    PHP -->|No| Rust
+    
+    Rust{Rust?}
+    Rust -->|Yes| CargoLock[cargo generate-lockfile]
+    Rust -->|No| RunCDXGen
+    
+    InstallPy --> RunCDXGen[Run cdxgen]
+    ResolveMvn --> RunCDXGen
+    ResolveGradle --> RunCDXGen
+    BundleInstall --> RunCDXGen
+    ComposerInstall --> RunCDXGen
+    CargoLock --> RunCDXGen
+    
+    RunCDXGen --> Validate[Validate SBOM]
+    Validate --> Upload{Upload?}
+    Upload -->|Yes| UploadDT[Upload to Dependency Track]
+    Upload -->|No| SaveLocal[Save locally]
+    
+    UploadDT --> End([Complete])
+    SaveLocal --> End
+    
+    style Start fill:#c8e6c9
+    style End fill:#c8e6c9
+    style RunCDXGen fill:#fff9c4
+    style Validate fill:#fff9c4
+```
+
+### 3. Docker 이미지 분석 흐름
+
+```mermaid
+flowchart TD
+    Start([entrypoint.sh starts]) --> CheckMode{Scan Mode?}
+    CheckMode -->|IMAGE| CheckDocker[Check Docker socket]
+    CheckDocker --> ValidImage{Image exists?}
+    ValidImage -->|No| Error[Error: Image not found]
+    ValidImage -->|Yes| RunSyft[Run syft on image]
+    RunSyft --> Extract[Extract packages]
+    Extract --> Generate[Generate CycloneDX]
+    Generate --> Validate[Validate SBOM]
+    Validate --> Output[Output SBOM file]
+    Output --> End([Complete])
+    
+    style Start fill:#c8e6c9
+    style End fill:#c8e6c9
+    style RunSyft fill:#fff9c4
 ```
 
 ## 분석 도구 선택 로직
