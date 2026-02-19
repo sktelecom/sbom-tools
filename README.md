@@ -1,244 +1,141 @@
 # SBOM Tools
 
-**[🇰🇷 한국어](README.ko.md)** | **🇺🇸 English**
+> Automated Software Bill of Materials (SBOM) generation tool for supply chain security
 
-> Software Bill of Materials (SBOM) generation tool for supply chain security
-
-[![GitHub release](https://img.shields.io/github/v/release/sktelecom/sbom-tools?style=flat-square)](https://github.com/sktelecom/sbom-tools/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/sktelecom/sbom-scanner?style=flat-square)](https://github.com/sktelecom/sbom-tools/pkgs/container/sbom-scanner)
+[![GitHub release](https://img.shields.io/github/v/release/haksungjang/sbom-tools?style=flat-square)](https://github.com/haksungjang/sbom-tools/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/sktelecom/sbom-scanner?style=flat-square)](https://github.com/haksungjang/sbom-tools/pkgs/container/sbom-scanner)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/sktelecom/sbom-tools?style=flat-square)](https://github.com/sktelecom/sbom-tools/stargazers)
 
 ## Overview
 
-SBOM Tools is a comprehensive solution for automatically generating Software Bill of Materials (SBOM) across various programming languages and environments. Developed by SK Telecom to enhance supply chain security, it's now open-sourced for everyone to use.
+SBOM Tools automatically generates Software Bill of Materials (SBOM) in [CycloneDX 1.4](https://cyclonedx.org/) format for multiple programming languages and environments. Originally developed by SK Telecom for supply chain security management, now available as open source.
 
 ### Key Features
 
 - **Multi-language Support**: Java, Python, Node.js, Ruby, PHP, Rust, Go, .NET, C/C++
-- **Versatile Analysis**: Source code, Docker images, binary files, RootFS
-- **Standard Format**: Generates CycloneDX 1.4 format SBOM
-- **Docker-based**: No need to install language-specific runtimes
-- **Multi-platform**: Supports Linux (AMD64, ARM64) and macOS
+- **Versatile Analysis Modes**: Source code, Docker images, binary files, RootFS
+- **Standard Format**: CycloneDX 1.4
+- **Docker-based**: No language-specific runtime installation required on the host
+- **Cross-platform**: Linux (AMD64, ARM64), macOS, Windows (Git Bash)
 
-### Supported Languages
+### Supported Languages & Tools
 
-| Language | Package Manager | Supported Versions |
-|----------|----------------|-------------------|
-| **Java** | Maven, Gradle | Java 7-17 (JDK 17) |
-| **Python** | pip, Poetry, Pipenv | Python 3.6+ |
-| **Node.js** | npm, Yarn, pnpm | Node.js 14+ |
-| **Ruby** | Bundler | Ruby 2.x, 3.x |
-| **PHP** | Composer | PHP 7.x, 8.x |
-| **Rust** | Cargo | Rust 1.x |
-| **Go** | Go modules | Go 1.16+ |
-| **.NET** | NuGet | .NET Core, .NET 5+ |
-| **C/C++** | Conan, vcpkg | - |
-
-> **Note:** The Docker image includes JDK 17, which supports analysis of projects built with Java 7-17. For Java 21 projects or Python 2.x legacy projects, please refer to the [documentation](docs/usage-guide.md).
+| Language | Package Managers | Analysis Tool |
+|----------|-----------------|---------------|
+| **Java** | Maven, Gradle | cdxgen |
+| **Python** | pip, Poetry | cdxgen |
+| **Node.js** | npm, Yarn, pnpm | cdxgen |
+| **Ruby** | Bundler | cdxgen |
+| **PHP** | Composer | cdxgen |
+| **Rust** | Cargo | cdxgen |
+| **Go** | Go modules | cdxgen |
+| **.NET** | NuGet | cdxgen |
+| **Docker Image** | — | syft |
+| **Binary / RootFS** | — | syft |
 
 ## Quick Start
 
-### 1. Prerequisites
+### Prerequisites
 
-- **Docker**: 20.10 or higher ([Installation Guide](https://docs.docker.com/get-docker/))
+- Docker 20.10 or higher
+- 4 GB+ available disk space
 
-```bash
-# Verify Docker installation
-docker --version
-```
-
-### 2. Download Script
+### Installation
 
 ```bash
-# Download the script
-curl -O https://raw.githubusercontent.com/sktelecom/sbom-tools/main/scripts/scan-sbom.sh
-chmod +x scan-sbom.sh
+# Clone the repository
+git clone https://github.com/haksungjang/sbom-tools.git
+cd sbom-tools
+
+# Pull the scanner image
+docker pull ghcr.io/sktelecom/sbom-scanner:latest
 ```
 
-### 3. Generate SBOM
+### Basic Usage
 
 ```bash
-# Analyze source code in current directory
-cd /path/to/your/project
-./scan-sbom.sh --project "MyApp" --version "1.0.0" --generate-only
+# Scan source code (run from project root)
+./scripts/scan-sbom.sh --project "MyApp" --version "1.0.0" --generate-only
+
+# Scan a Docker image
+./scripts/scan-sbom.sh --project "MyApp" --version "1.0.0" \
+  --target "nginx:latest" --generate-only
+
+# Scan a binary file
+./scripts/scan-sbom.sh --project "MyFirmware" --version "2.0.0" \
+  --target "./firmware.bin" --generate-only
 ```
 
-**Result**: Generates `MyApp_1.0.0_bom.json`
-
-## Usage Examples
-
-### Source Code Analysis
-
-```bash
-# Java Maven project
-cd my-java-app
-scan-sbom.sh --project "JavaApp" --version "1.0.0" --generate-only
-
-# Python project
-cd my-python-app
-scan-sbom.sh --project "PythonApp" --version "1.0.0" --generate-only
-
-# Node.js project
-cd my-nodejs-app
-scan-sbom.sh --project "NodeApp" --version "1.0.0" --generate-only
-```
-
-### Docker Image Analysis
-
-```bash
-# Analyze local image
-scan-sbom.sh --target "myapp:latest" --project "MyApp" --version "1.0" --generate-only
-
-# Analyze registry image
-scan-sbom.sh --target "nginx:alpine" --project "Nginx" --version "alpine" --generate-only
-```
-
-### Binary/Firmware Analysis
-
-```bash
-# Analyze firmware file
-scan-sbom.sh --target firmware.bin --project "RouterOS" --version "2.0" --generate-only
-
-# Analyze RootFS directory
-scan-sbom.sh --target ./rootfs/ --project "DeviceOS" --version "1.0" --generate-only
-```
-
-## Advanced Usage
-
-### Docker Image Version Control
-
-By default, the script uses the `latest` Docker image. You can pin to a specific version for production use:
-
-```bash
-# Use latest release (default)
-./scan-sbom.sh --project "MyApp" --version "1.0.0" --generate-only
-
-# Pin to v1 family (latest v1.x.x)
-SBOM_SCANNER_IMAGE=ghcr.io/sktelecom/sbom-scanner:v1 \
-  ./scan-sbom.sh --project "MyApp" --version "1.0.0" --generate-only
-
-# Pin to exact version for production
-SBOM_SCANNER_IMAGE=ghcr.io/sktelecom/sbom-scanner:v1.0.0 \
-  ./scan-sbom.sh --project "MyApp" --version "1.0.0" --generate-only
-```
-
-**Version Strategy:**
-- `latest` - Always get the newest features (recommended for development)
-- `v1` - Latest v1.x.x release (recommended for CI/CD)
-- `v1.0` - Latest v1.0.x patch (recommended for stable production)
-- `v1.0.0` - Exact version (maximum stability)
-
-### Windows Usage
-
-```cmd
-REM Download script
-curl -O https://raw.githubusercontent.com/sktelecom/sbom-tools/main/scripts/scan-sbom.bat
-
-REM Default usage
-scan-sbom.bat --project "MyApp" --version "1.0.0" --generate-only
-
-REM Pin to specific version
-set SBOM_SCANNER_IMAGE=ghcr.io/sktelecom/sbom-scanner:v1
-scan-sbom.bat --project "MyApp" --version "1.0.0" --generate-only
-```
-
-## Documentation
-
-- **[Getting Started](docs/getting-started.md)**: Detailed installation and first-use guide (Korean)
-- **[Usage Guide](docs/usage-guide.md)**: Language-specific usage and advanced features (Korean)
-- **[Docker Image](docker/README.md)**: Docker image build and deployment (Korean)
+Output file: `{ProjectName}_{Version}_bom.json` (CycloneDX 1.4 JSON)
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  scan-sbom.sh                       │
-│                (User Interface)                      │
-└─────────────────────┬───────────────────────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────┐
-│         ghcr.io/sktelecom/sbom-scanner:v1           │
-│                (Docker Container)                    │
-│  ┌──────────────────────────────────────────────┐  │
-│  │           entrypoint.sh                      │  │
-│  │     (Analysis Logic & Tool Execution)        │  │
-│  └──────────────────────────────────────────────┘  │
-│                      │                              │
-│        ┌─────────────┼─────────────┐               │
-│        │             │             │               │
-│        ▼             ▼             ▼               │
-│   ┌────────┐   ┌────────┐   ┌────────┐            │
-│   │cdxgen  │   │ syft   │   │ trivy  │            │
-│   │(Source)│   │(Image) │   │(Image) │            │
-│   └────────┘   └────────┘   └────────┘            │
-└─────────────────────────────────────────────────────┘
-                      │
-                      ▼
-          ┌───────────────────────┐
-          │   bom.json (Output)   │
-          │   (CycloneDX 1.4)     │
-          └───────────────────────┘
+┌────────────────────────────────────────────────┐
+│           scan-sbom.sh  (Wrapper Script)       │
+│  • Parses arguments & detects target type      │
+│  • Orchestrates Docker execution               │
+└────────────────────────┬───────────────────────┘
+                         │  docker run
+                         ▼
+┌────────────────────────────────────────────────┐
+│        Docker Container (sbom-scanner)         │
+│  ┌─────────────────────────────────────────┐   │
+│  │     Multi-language Runtime Environment  │   │
+│  │  JDK 17 · Python 3 · Node.js 20 · Ruby │   │
+│  │  PHP · Rust · Go · .NET · Build Tools  │   │
+│  └─────────────────────────────────────────┘   │
+│  ┌──────────────────┐  ┌────────────────────┐  │
+│  │ cdxgen           │  │ syft               │  │
+│  │ (source code)    │  │ (images/binaries)  │  │
+│  └──────────────────┘  └────────────────────┘  │
+└────────────────────────┬───────────────────────┘
+                         │
+                         ▼
+                  CycloneDX 1.4 SBOM (.json)
+```
+
+See [docs/architecture.md](docs/architecture.md) for details (Korean).
+
+## Documentation (한국어)
+
+| 문서 | 설명 |
+|------|------|
+| [시작하기](docs/getting-started.md) | 설치, 환경 설정, 첫 SBOM 생성 |
+| [사용 가이드](docs/usage-guide.md) | 전체 옵션, 분석 모드, CI/CD 통합, 트러블슈팅 |
+| [예제 가이드](docs/examples-guide.md) | 언어별 예제 프로젝트 실습 |
+| [아키텍처](docs/architecture.md) | 시스템 구조 및 설계 원칙 |
+| [테스트 가이드](docs/contributing/testing-guide.md) | 테스트 작성 및 실행 |
+| [패키지 매니저 추가](docs/contributing/package-manager-guide.md) | 새로운 언어/패키지 매니저 지원 추가 |
+| [기여하기](CONTRIBUTING.md) | 기여 절차 및 코딩 규칙 |
+
+## Testing
+
+```bash
+./tests/test-scan.sh                    # 기본 실행
+VERBOSE=true ./tests/test-scan.sh       # 상세 출력
+DEBUG_MODE=true ./tests/test-scan.sh    # 디버그 모드
 ```
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) (Korean) for details.
+We welcome contributions of all kinds — bug fixes, new language support, documentation improvements, and more.
 
-### Reporting Issues
-
-Report bugs or suggest features via [GitHub Issues](https://github.com/sktelecom/sbom-tools/issues).
-
-### Pull Requests
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- **Bug reports**: [GitHub Issues](https://github.com/haksungjang/sbom-tools/issues)
+- **Feature requests**: [GitHub Discussions](https://github.com/haksungjang/sbom-tools/discussions)
+- **Code contributions**: [CONTRIBUTING.md](CONTRIBUTING.md) (Korean)
 
 ## License
 
-Copyright © 2026 SK Telecom Co., Ltd. All Rights Reserved.
-
-This project is distributed under the [Apache License 2.0](LICENSE).
-
-```
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
-
-## Support
-
-- **Email**: opensource@sktelecom.com
-- **Issue Tracker**: [GitHub Issues](https://github.com/sktelecom/sbom-tools/issues)
-- **Documentation**: https://sktelecom.github.io/guide/supply-chain/
-
-## Related Projects
-
-- [CycloneDX](https://cyclonedx.org/) - SBOM standard format
-- [cdxgen](https://github.com/CycloneDX/cdxgen) - SBOM generation tool
-- [Syft](https://github.com/anchore/syft) - Container image analysis tool
-- [Dependency-Track](https://dependencytrack.org/) - SBOM analysis platform
+Apache License 2.0 — Copyright 2026 SK Telecom Co., Ltd.  
+See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-This project uses the following open-source projects:
-
-- [CycloneDX cdxgen](https://github.com/CycloneDX/cdxgen) - Apache 2.0
-- [Anchore Syft](https://github.com/anchore/syft) - Apache 2.0
-- [Aqua Security Trivy](https://github.com/aquasecurity/trivy) - Apache 2.0
+- [CycloneDX](https://cyclonedx.org/) — SBOM standard
+- [cdxgen](https://github.com/CycloneDX/cdxgen) — Source code analysis
+- [Syft](https://github.com/anchore/syft) — Container & binary analysis
 
 ---
 
-Made by SK Telecom Open Source Program Office
+Made with ❤️ by SK Telecom Open Source Team · [opensource@sktelecom.com](mailto:opensource@sktelecom.com)
