@@ -1,0 +1,165 @@
+name: Examples Testing
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'examples/**'
+      - 'scripts/**'
+      - 'docker/**'
+      - '.github/workflows/examples.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'examples/**'
+  schedule:
+    - cron: '0 0 * * 1'  # Weekly on Monday
+  workflow_dispatch:
+
+jobs:
+  test-examples:
+    name: Test ${{ matrix.example }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        example:
+          - java-maven
+          - java-gradle
+          - nodejs
+          - python
+          - go
+          - ruby
+          - php
+          - rust
+          - dotnet
+          # docker example excluded - Dockerfile alone doesn't generate components
+      fail-fast: false
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build SBOM Scanner image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docker
+          load: true
+          tags: sbom-scanner:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Test ${{ matrix.example }} example
+        env:
+          SBOM_SCANNER_IMAGE: sbom-scanner:test
+        run: |
+          cd examples/${{ matrix.example }}
+          
+          echo "Testing ${{ matrix.example }} example..."
+          ../../scripts/scan-sbom.sh \
+            --project "${{ matrix.example }}-example" \
+            --version "1.0.0" \
+            --generate-only
+          
+          # Find generated SBOM
+          SBOM_FILE=$(ls *_bom.json 2>/dev/null | head -1)
+          
+          if [ -z "$SBOM_FILE" ]; then
+            echo "❌ SBOM file not generated"
+            exit 1
+          fi
+          
+          echo "✓ SBOM generated: $SBOM_FILE"
+          
+          # Install jq if needed
+          if ! command -v jq &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+          
+          # Validate JSON
+          if ! jq empty "$SBOM_FILE" 2>/dev/null; then
+            echo "❌ Invalid JSON format"
+            cat "$SBOM_FILE"
+            exit 1
+          fi
+          
+          # Validate CycloneDX
+          if ! jq -e '.bomFormat == "CycloneDX"' "$SBOM_FILE" > /dev/null; then
+            echo "❌ Not a valid CycloneDX SBOM"
+            exit 1
+          fi
+          
+          # Check components
+          COMP_COUNT=$(jq '.components | length' "$SBOM_FILE")
+          echo "Components found: $COMP_COUNT"
+          
+          # Some examples might have 0 components if dependencies aren't resolved
+          # Only fail if SBOM generation itself failed
+          if [ -z "$COMP_COUNT" ]; then
+            echo "❌ Cannot read components from SBOM"
+            exit 1
+          fi
+          
+          if [ "$COMP_COUNT" -eq 0 ]; then
+            echo "⚠️ Warning: No components found (dependencies may not be resolved)"
+            echo "This is acceptable for some examples"
+          else
+            echo "✅ Test passed ($COMP_COUNT components)"
+          fi
+      
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.example }}
+          path: examples/${{ matrix.example }}/*_bom.json
+          retention-days: 7
+          if-no-files-found: warn
+  
+  summary:
+    name: Test Summary
+    needs: test-examples
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+      
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      
+      - name: Generate summary
+        run: |
+          echo "## Example Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Example | Status | Components |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|------------|" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -d sbom-* ]; then
+            for dir in sbom-*/; do
+              if [ -d "$dir" ]; then
+                example=$(basename "$dir" | sed 's/sbom-//')
+                sbom_file=$(ls "$dir"/*.json 2>/dev/null | head -1)
+                
+                if [ -n "$sbom_file" ]; then
+                  comp_count=$(jq '.components | length' "$sbom_file" 2>/dev/null || echo "0")
+                  if [ "$comp_count" -gt 0 ]; then
+                    echo "| $example | ✅ Success | $comp_count |" >> $GITHUB_STEP_SUMMARY
+                  else
+                    echo "| $example | ⚠️ No Components | 0 |" >> $GITHUB_STEP_SUMMARY
+                  fi
+                else
+                  echo "| $example | ❌ Failed | - |" >> $GITHUB_STEP_SUMMARY
+                fi
+              fi
+            done
+          else
+            echo "No artifacts found" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note**: Docker example is excluded as Dockerfile alone doesn't generate package components" >> $GITHUB_STEP_SUMMARY
