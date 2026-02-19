@@ -19,24 +19,25 @@ SBOM Scanner는 다음 환경을 포함한 Docker 이미지로 제공됩니다:
 
 | 카테고리 | 도구/런타임 | 버전 |
 |---------|------------|------|
-| **기본 이미지** | Node.js | 20 (Debian Bookworm) |
-| **Java** | Eclipse Temurin JDK | 8, 11, 17, 21 |
+| **기본 이미지** | Node.js | 20 (Debian Slim) |
+| **Java** | Eclipse Temurin JDK | 17 LTS |
 | **Python** | Python 3 | 3.11+ |
-| **Python** | Python 2 (레거시) | 2.7 |
 | **Ruby** | Ruby + Bundler | 3.x |
 | **PHP** | PHP + Composer | 8.x |
-| **Rust** | Rust + Cargo | Stable |
+| **Rust** | Rust + Cargo | Stable (minimal) |
 | **빌드 도구** | Maven, Gradle | Latest |
 | **SBOM 생성** | cdxgen | Latest |
 | **이미지 분석** | Syft | Latest |
 | **컨테이너 분석** | Docker CLI | Latest |
+
+> **최적화:** 이미지 크기를 50% 줄이기 위해 JDK 17만 포함됩니다 (Java 7-17 지원). Python 2는 제거되었습니다 (2020 EOL).
 
 ### 이미지 정보
 
 - **저장소**: `ghcr.io/sktelecom/sbom-scanner`
 - **태그**: `v1`, `latest`
 - **플랫폼**: `linux/amd64`, `linux/arm64`
-- **크기**: 약 2.5GB (압축 후)
+- **크기**: 약 3-4 GB (최적화됨, 이전 7.3 GB)
 
 ## 사전 빌드된 이미지 사용
 
