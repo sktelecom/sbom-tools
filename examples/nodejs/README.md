@@ -130,7 +130,7 @@ curl http://localhost:3000/
 {
   "message": "SBOM Example Application is running!",
   "version": "1.0.0",
-  "timestamp": "2024-01-15T10:30:00+09:00",
+  "timestamp": "2026-01-15T10:30:00+09:00",
   "framework": "Express.js"
 }
 ```
@@ -172,7 +172,7 @@ curl http://localhost:3000/data
       "id": 1,
       "value": 42,
       "label": "Item 1",
-      "timestamp": "2024-01-14T10:30:00+09:00"
+      "timestamp": "2026-01-14T10:30:00+09:00"
     }
   ],
   "count": 10
@@ -211,10 +211,10 @@ curl http://localhost:3000/utils/date
 **응답**:
 ```json
 {
-  "current": "2024-01-15 10:30:00",
-  "utc": "2024-01-15 01:30:00",
+  "current": "2026-01-15 10:30:00",
+  "utc": "2026-01-15 01:30:00",
   "unix": 1705294200,
-  "iso": "2024-01-15T01:30:00.000Z"
+  "iso": "2026-01-15T01:30:00.000Z"
 }
 ```
 

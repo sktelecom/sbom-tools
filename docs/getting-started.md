@@ -28,14 +28,14 @@ Docker가 설치되어 있지 않다면 [Docker 공식 설치 문서](https://do
 ### 1. 저장소 클론
 
 ```bash
-git clone https://github.com/haksungjang/sbom-tools.git
+git clone https://github.com/sktelecom/sbom-tools.git
 cd sbom-tools
 ```
 
 스크립트만 필요하다면 단독으로 내려받을 수도 있습니다.
 
 ```bash
-curl -O https://raw.githubusercontent.com/haksungjang/sbom-tools/main/scripts/scan-sbom.sh
+curl -O https://raw.githubusercontent.com/sktelecom/sbom-tools/main/scripts/scan-sbom.sh
 chmod +x scan-sbom.sh
 ```
 

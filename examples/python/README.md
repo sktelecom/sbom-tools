@@ -135,7 +135,7 @@ curl http://localhost:5000/
 {
   "message": "SBOM Example Application is running!",
   "version": "1.0.0",
-  "timestamp": "2024-01-15T10:30:00.123456"
+  "timestamp": "2026-01-15T10:30:00.123456"
 }
 ```
 

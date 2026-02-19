@@ -2,8 +2,8 @@
 
 > Automated Software Bill of Materials (SBOM) generation tool for supply chain security
 
-[![GitHub release](https://img.shields.io/github/v/release/haksungjang/sbom-tools?style=flat-square)](https://github.com/haksungjang/sbom-tools/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/sktelecom/sbom-scanner?style=flat-square)](https://github.com/haksungjang/sbom-tools/pkgs/container/sbom-scanner)
+[![GitHub release](https://img.shields.io/github/v/release/sktelecom/sbom-tools?style=flat-square)](https://github.com/sktelecom/sbom-tools/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/sktelecom/sbom-scanner?style=flat-square)](https://github.com/sktelecom/sbom-tools/pkgs/container/sbom-scanner)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square)](LICENSE)
 
 ## Overview
@@ -44,7 +44,7 @@ SBOM Tools automatically generates Software Bill of Materials (SBOM) in [Cyclone
 
 ```bash
 # Clone the repository
-git clone https://github.com/haksungjang/sbom-tools.git
+git clone https://github.com/sktelecom/sbom-tools.git
 cd sbom-tools
 
 # Pull the scanner image
@@ -121,8 +121,8 @@ DEBUG_MODE=true ./tests/test-scan.sh    # 디버그 모드
 
 We welcome contributions of all kinds — bug fixes, new language support, documentation improvements, and more.
 
-- **Bug reports**: [GitHub Issues](https://github.com/haksungjang/sbom-tools/issues)
-- **Feature requests**: [GitHub Discussions](https://github.com/haksungjang/sbom-tools/discussions)
+- **Bug reports**: [GitHub Issues](https://github.com/sktelecom/sbom-tools/issues)
+- **Feature requests**: [GitHub Discussions](https://github.com/sktelecom/sbom-tools/discussions)
 - **Code contributions**: [CONTRIBUTING.md](CONTRIBUTING.md) (Korean)
 
 ## License
