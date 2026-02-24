@@ -138,4 +138,4 @@ See [LICENSE](LICENSE) for details.
 
 ---
 
-Made with ❤️ by SK Telecom Open Source Team · [opensource@sktelecom.com](mailto:opensource@sktelecom.com)
+Made by SK Telecom Open Source Team · [opensource@sktelecom.com](mailto:opensource@sktelecom.com)
