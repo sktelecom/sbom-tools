@@ -80,6 +80,9 @@ syft sbom-example:latest -o cyclonedx-json > bom.json
 
 ### 방법 4: Trivy 사용
 
+> **⚠️ 보안 경고 (2026-03-24):** `aquasecurity/trivy-action` GitHub Action에 공급망 공격(악성 코드 삽입)이 보고되었습니다.
+> Trivy CLI 자체의 안전성도 공식적으로 재확인될 때까지, 아래 명령어 실행 전 반드시 [공식 릴리스 페이지](https://github.com/aquasecurity/trivy/releases)에서 최신 보안 공지를 확인하세요.
+
 ```bash
 # Trivy 설치
 brew install trivy  # macOS
@@ -212,6 +215,8 @@ docker images sbom-example:latest
 ```
 
 ### 취약점 스캔
+
+> **⚠️ 보안 경고 (2026-03-24):** Trivy 관련 공급망 공격이 보고되었습니다. 실행 전 공식 보안 공지를 확인하세요.
 
 ```bash
 # Trivy로 취약점 스캔
@@ -378,6 +383,8 @@ HEALTHCHECK --interval=30s --timeout=3s \
 ### 취약점 스캔
 
 정기적으로 이미지를 스캔하여 취약점을 확인하세요:
+
+> **⚠️ 보안 경고 (2026-03-24):** Trivy 관련 공급망 공격이 보고되었습니다. 실행 전 공식 보안 공지를 확인하세요.
 
 ```bash
 trivy image --severity HIGH,CRITICAL sbom-example:latest
