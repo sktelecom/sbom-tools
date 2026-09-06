@@ -448,6 +448,74 @@ test("a failed scan surfaces the error with recovery actions", async ({ page }) 
   ).toHaveAttribute("href", "#/new");
 });
 
+// Regression: a scan started from `#/new` that fails leaves the hash at
+// `#/new` (the router deliberately does not clear the failure just because the
+// hash didn't move — see NextApp's routeRef comment). Clicking a "New scan"
+// control in that state is then a same-hash `<a href="#/new">` click, which
+// fires no `hashchange`, so the reset has to happen on click, not on
+// navigation. Covers the error card and the always-visible TopBar button; both
+// wire the same reset callback as the Sidebar link below.
+test("New scan recovers a stranded failure even though the hash never left #/new", async ({ page }) => {
+  await page.route("**/capabilities", (r) =>
+    r.fulfill({ contentType: "application/json", body: JSON.stringify({ firmware: false, scanoss: false, docker: true }) }),
+  );
+  await page.route("**/results", (r) => r.fulfill({ contentType: "application/json", body: "[]" }));
+  await page.route("**/scan-stream**", (r) => r.abort());
+  await page.goto("/?ui=next#/new");
+  await page.fill("#project", "demo");
+  await page.fill("#version", "1.0");
+  await page.getByTestId("run-scan").click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  expect(await page.evaluate(() => window.location.hash)).toBe("#/new");
+
+  // The error card's own CTA resets the form despite the unchanged hash.
+  await page.getByRole("main").getByRole("link", { name: "New scan" }).click();
+  await expect(page.locator("#project")).toHaveValue("");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  // Fail the same way again, then recover via the TopBar's button instead —
+  // it is rendered outside <main> and stays visible through the failure view.
+  await page.fill("#project", "demo");
+  await page.fill("#version", "1.0");
+  await page.getByTestId("run-scan").click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await page.getByRole("banner").getByRole("link", { name: "New scan" }).click();
+  await expect(page.locator("#project")).toHaveValue("");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+// Same stranded-hash bug, but for a scan that completes with a failure result
+// (rather than a dropped stream) and no `id` — so the section screen (with the
+// Sidebar) is what's showing when the hash is still stuck at `#/new`.
+test("Sidebar's New scan recovers a stranded failure result", async ({ page }) => {
+  await page.route("**/capabilities", (r) =>
+    r.fulfill({ contentType: "application/json", body: JSON.stringify({ firmware: false, scanoss: false, docker: true }) }),
+  );
+  await page.route("**/results", (r) => r.fulfill({ contentType: "application/json", body: "[]" }));
+  await page.route("**/scan-stream**", (r) =>
+    r.fulfill({
+      contentType: "text/event-stream",
+      body: `event: done\ndata: ${JSON.stringify({ ...DONE, ok: false, id: undefined })}\n\n`,
+    }),
+  );
+  await page.goto("/?ui=next#/new");
+  await page.fill("#project", "demo");
+  await page.fill("#version", "1.0");
+  await page.getByTestId("run-scan").click();
+
+  // No id on the done event → the hash is never moved off #/new, but the
+  // failed result still renders the section screen (with the rail).
+  await expect(page.getByRole("status")).toHaveText("Scan failed");
+  expect(await page.evaluate(() => window.location.hash)).toBe("#/new");
+
+  await page
+    .getByRole("navigation")
+    .getByRole("link", { name: "New scan" })
+    .click();
+  await page.locator("#project").waitFor();
+  await expect(page.locator("#project")).toHaveValue("");
+});
+
 // The subtitle under the result heading names what was scanned. It lives inside
 // the screenshot baselines, but pixels are the wrong guard for wording: a short
 // phrase edit stays under the diff tolerance, so the baselines kept an outdated

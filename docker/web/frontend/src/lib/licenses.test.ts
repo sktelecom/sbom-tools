@@ -108,6 +108,21 @@ describe("licenseRiskTier", () => {
     expect(licenseRiskTier("GPL-2.0-only")).toBe("strong-copyleft");
   });
 
+  it("grades Creative Commons by the one clause with a copyleft-like effect (Share-Alike)", () => {
+    // Datasets and AI models carry these, not software licenses. Attribution and
+    // a field-of-use limit (NC, ND) never propagate the license, so they land on
+    // permissive for this axis; only Share-Alike does, the same way LGPL/MPL do
+    // for modified files.
+    expect(licenseRiskTier("CC-BY-4.0")).toBe("permissive");
+    expect(licenseRiskTier("CC-BY-NC-4.0")).toBe("permissive");
+    expect(licenseRiskTier("CC-BY-ND-4.0")).toBe("permissive");
+    expect(licenseRiskTier("CC0-1.0")).toBe("permissive");
+    // Anchored on CC-BY: SA is matched before the bare CC-BY test, same reason
+    // AGPL/LGPL precede GPL.
+    expect(licenseRiskTier("CC-BY-SA-4.0")).toBe("weak-copyleft");
+    expect(licenseRiskTier("CC-BY-NC-SA-4.0")).toBe("weak-copyleft");
+  });
+
   it("never assumes an unrecognised license is permissive", () => {
     // The core safety property: unknown is uncategorized, not safe.
     expect(licenseRiskTier("Foo-1.0")).toBe("uncategorized");

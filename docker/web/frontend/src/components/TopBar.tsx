@@ -9,6 +9,7 @@ import {
   MonitorPlay,
   Plus,
   RotateCw,
+  ScanSearch,
   X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
@@ -44,10 +45,19 @@ interface TopBarProps {
   showHomeLink?: boolean;
   /** Hash for the New scan screen — the primary global action. */
   newHref: string;
+  /** Reset to a blank New scan form, in addition to the `#/new` navigation
+   *  `newHref` already carries — needed when a scan started from `#/new`
+   *  fails, leaving the hash unchanged so the anchor's navigation is a no-op. */
+  onNewScan?: () => void;
   /** Past scans for the Recent menu (newest first). */
   recent?: RecentScanLink[];
   /** Delete a past scan from the Recent list (removes its artifacts). */
   onDeleteRecent?: (id: string) => void;
+  /** Hash for the External lookup screen. Absent hides the entry point,
+   *  meaning `capabilities.externalLookup` is off, or this is the static
+   *  demo, which has no server to ask. Reachable whether or not a scan is
+   *  loaded, so this lives in the chrome rather than the section rail. */
+  lookupHref?: string;
 }
 
 const SEVERITY_DOT: Record<NonNullable<RecentScanLink["topSeverity"]>, string> = {
@@ -74,9 +84,11 @@ export function TopBar({
   homeHref,
   showHomeLink,
   newHref,
+  onNewScan,
   recent = [],
   onDeleteRecent,
   version,
+  lookupHref,
 }: TopBarProps) {
   const { t, i18n } = useTranslation();
   // BASE_URL, not "/": the demo is served from a sub-path, where a rooted src
@@ -148,12 +160,28 @@ export function TopBar({
         )}
         <a
           href={newHref}
+          onClick={onNewScan}
           aria-label={t("shell.newScan")}
           className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
         >
           <Plus className="h-4 w-4" aria-hidden />
           <span className="hidden sm:inline">{t("shell.newScan")}</span>
         </a>
+        {lookupHref && (
+          <a
+            href={lookupHref}
+            aria-label={t("nav.lookupTitle")}
+            title={t("nav.lookupTitle")}
+            data-testid="external-lookup-link"
+            className={cn(
+              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+              "transition-colors duration-fast ease-out-soft hover:bg-muted hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+            )}
+          >
+            <ScanSearch className="h-4 w-4" aria-hidden />
+          </a>
+        )}
         <RecentMenu
           recent={recent}
           homeHref={homeHref}

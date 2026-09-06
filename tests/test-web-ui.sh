@@ -138,6 +138,10 @@ def fake_stream(args, on_log, on_progress=None, cancel=None, container=None, env
     return 0
 server._stream_cmd = fake_stream
 server._sibling_image_present = lambda image: True
+# This section tests dispatch/allowlisting, not the background refresh (that has
+# its own section below with a fake docker on PATH) — stub it to a no-op so an
+# "already present" image never shells out to a real `docker pull` here.
+server.refresh_sibling_image_quietly = lambda *a, **k: None
 
 rc = server.run_sibling_scan(
     "ghcr.io/sktelecom/bomlens-aibom:1.5.0", "AIBOM", run_out,
@@ -735,6 +739,10 @@ server._self_container_id = lambda: "selfcid000000"
 server.docker_cli_present = lambda: True
 server.docker_capable = lambda: True
 server.spdx_convert_capable = lambda: False
+# Same no-op as the run_sibling_scan dispatch tests above: this section is not
+# about the background refresh, so an "already present" scanner image must not
+# shell out to a real `docker pull` here.
+server.refresh_sibling_image_quietly = lambda *a, **k: None
 
 bom = server.OUTPUT_DIR + "/run_1/run_1_bom.json"
 spdx = server.OUTPUT_DIR + "/run_1/run_1_bom.spdx.json"
@@ -2946,6 +2954,453 @@ if [ "$n_add" = "1" ] && [ "$n_del" -ge "2" ]; then
     pass "the claim is released on the early-return path and in the finally"
 else
     fail "claim/release are unbalanced (add=$n_add, discard=$n_del)"
+fi
+
+echo "== sibling image refresh: an already-present image is re-pulled quietly =="
+# _sibling_image_present only means the tag was pulled at SOME point; the sibling
+# firmware/aibom/deep-cve image (and the base scanner image, for on-demand SPDX)
+# can otherwise sit on a stale `:latest` layer forever. run_sibling_scan /
+# convert_bom_to_spdx now call refresh_sibling_image_quietly(image, on_log) in
+# that case, real `docker pull`, bounded by a STALL timeout (not elapsed time) so
+# it never meaningfully delays a scan. A fake `docker` on PATH stands in for the
+# daemon; _SIBLING_REFRESH_STALL_SECS shortens the stall bound so a simulated
+# stalled pull gives up in ~1s instead of the real-world 12s default.
+FAKEDOCKER="$WORK/fakedockerbin"; mkdir -p "$FAKEDOCKER"
+FAKE_DOCKER_LOG="$WORK/fakedocker.log"
+cat > "$FAKEDOCKER/docker" <<'STUB'
+#!/usr/bin/env bash
+echo "docker $*" >> "${FAKE_DOCKER_LOG:-/dev/null}"
+case "${1:-}" in
+  pull)
+    case "${FAKE_DOCKER_PULL_MODE:-uptodate}" in
+      uptodate)
+        echo "Status: Image is up to date for ${2:-image}"
+        exit 0 ;;
+      fail)
+        echo "Error response from daemon: pull access denied" >&2
+        exit 1 ;;
+      stall)
+        sleep 30
+        exit 0 ;;
+      partial)
+        # One real layer-status line (matches server.PullProgress's format), then
+        # nothing — a download that started but stopped making progress.
+        echo "17a39c0ba978: Downloading"
+        sleep 30
+        exit 0 ;;
+    esac
+    ;;
+  run) exit 0 ;;
+  *) exit 0 ;;
+esac
+STUB
+chmod +x "$FAKEDOCKER/docker"
+
+# Case 1: the fake pull reports up to date immediately -> refresh finishes in a
+# fraction of a second, and the scan proceeds all the way to the sibling `docker
+# run`. _sibling_image_present is stubbed (this is not a test of the presence
+# check itself), but refresh_sibling_image_quietly runs FOR REAL against the
+# fake docker on PATH.
+if SBOM_OUTPUT_DIR="$OUT" PATH="$FAKEDOCKER:$PATH" FAKE_DOCKER_LOG="$FAKE_DOCKER_LOG" \
+   FAKE_DOCKER_PULL_MODE=uptodate python3 - "$ROOT_DIR" <<'PY'
+import os, sys, time
+sys.path.insert(0, os.path.join(sys.argv[1], "docker", "web"))
+import server
+
+server._self_container_id = lambda: "selfcid000000"
+server._sibling_image_present = lambda image: True
+
+run_out = server.OUTPUT_DIR + "/run_1"
+logs = []
+started = time.monotonic()
+rc = server.run_sibling_scan(
+    "ghcr.io/sktelecom/bomlens-aibom:1.5.0", "AIBOM", run_out,
+    logs.append, model_id="openai/clip",
+)
+elapsed = time.monotonic() - started
+assert rc == 0, (rc, logs)
+assert elapsed < 5, "an up-to-date refresh must not meaningfully delay the scan (%.1fs)" % elapsed
+assert any("launching" in ln for ln in logs), logs
+STUB_LOG = os.environ["FAKE_DOCKER_LOG"]
+with open(STUB_LOG) as fh:
+    calls = fh.read()
+assert "docker pull ghcr.io/sktelecom/bomlens-aibom:1.5.0" in calls, calls
+assert "docker run" in calls, "the scan must still reach the sibling docker run"
+PY
+then
+    pass "an up-to-date fake pull finishes fast and the scan reaches the sibling docker run"
+else
+    fail "up-to-date refresh case failed (see assertion above)"
+fi
+
+# Case 2: the fake pull hangs with NO output at all (offline / blocked network).
+# With the stall bound shortened to ~1s, refresh_sibling_image_quietly must give
+# up quickly and the scan must still proceed — the refresh is best-effort and
+# must never be the thing that fails a scan.
+: > "$FAKE_DOCKER_LOG"
+if SBOM_OUTPUT_DIR="$OUT" PATH="$FAKEDOCKER:$PATH" FAKE_DOCKER_LOG="$FAKE_DOCKER_LOG" \
+   FAKE_DOCKER_PULL_MODE=stall _SIBLING_REFRESH_STALL_SECS=1 python3 - "$ROOT_DIR" <<'PY'
+import os, sys, time
+sys.path.insert(0, os.path.join(sys.argv[1], "docker", "web"))
+import server
+assert server._SIBLING_REFRESH_STALL_SECS == 1.0, server._SIBLING_REFRESH_STALL_SECS
+
+server._self_container_id = lambda: "selfcid000000"
+server._sibling_image_present = lambda image: True
+
+run_out = server.OUTPUT_DIR + "/run_1"
+logs = []
+started = time.monotonic()
+rc = server.run_sibling_scan(
+    "ghcr.io/sktelecom/bomlens-aibom:1.5.0", "AIBOM", run_out,
+    logs.append, model_id="openai/clip",
+)
+elapsed = time.monotonic() - started
+assert rc == 0, (rc, logs)
+assert elapsed < 10, "a fully stalled refresh must give up quickly, not hang (%.1fs)" % elapsed
+assert any("skipped" in ln for ln in logs), logs
+assert any("launching" in ln for ln in logs), logs
+PY
+then
+    pass "a fully stalled fake pull is given up on quickly and the scan still proceeds"
+else
+    fail "stalled refresh case failed (see assertion above)"
+fi
+
+# Case 3: the fake pull prints one real layer line (a download actually started)
+# and then stalls — same outcome as case 2 (the scan must proceed), and this
+# also exercises the PullProgress reader path inside the refresh.
+: > "$FAKE_DOCKER_LOG"
+if SBOM_OUTPUT_DIR="$OUT" PATH="$FAKEDOCKER:$PATH" FAKE_DOCKER_LOG="$FAKE_DOCKER_LOG" \
+   FAKE_DOCKER_PULL_MODE=partial _SIBLING_REFRESH_STALL_SECS=1 python3 - "$ROOT_DIR" <<'PY'
+import os, sys, time
+sys.path.insert(0, os.path.join(sys.argv[1], "docker", "web"))
+import server
+
+server._self_container_id = lambda: "selfcid000000"
+server._sibling_image_present = lambda image: True
+
+run_out = server.OUTPUT_DIR + "/run_1"
+logs = []
+started = time.monotonic()
+rc = server.run_sibling_scan(
+    "ghcr.io/sktelecom/bomlens-deep-cve:1.5.0", "IMAGE", run_out,
+    logs.append, target_image="ghcr.io/library/nginx:1.25",
+)
+elapsed = time.monotonic() - started
+assert rc == 0, (rc, logs)
+assert elapsed < 10, "a stalled-after-progress refresh must give up quickly too (%.1fs)" % elapsed
+assert any("launching" in ln for ln in logs), logs
+PY
+then
+    pass "a fake pull that starts and then stalls still lets the scan proceed"
+else
+    fail "partial-progress refresh case failed (see assertion above)"
+fi
+
+# Case 4: the fake pull exits immediately with a non-zero code (a rejected pull,
+# not a stall) — also best-effort, also must not block the scan.
+: > "$FAKE_DOCKER_LOG"
+if SBOM_OUTPUT_DIR="$OUT" PATH="$FAKEDOCKER:$PATH" FAKE_DOCKER_LOG="$FAKE_DOCKER_LOG" \
+   FAKE_DOCKER_PULL_MODE=fail python3 - "$ROOT_DIR" <<'PY'
+import os, sys, time
+sys.path.insert(0, os.path.join(sys.argv[1], "docker", "web"))
+import server
+
+server._self_container_id = lambda: "selfcid000000"
+server._sibling_image_present = lambda image: True
+
+run_out = server.OUTPUT_DIR + "/run_1"
+logs = []
+started = time.monotonic()
+rc = server.run_sibling_scan(
+    "ghcr.io/sktelecom/bomlens-firmware:1.5.0", "FIRMWARE", run_out,
+    logs.append, upload_file=server.UPLOAD_DIR + "/tok/fw.bin",
+)
+elapsed = time.monotonic() - started
+assert rc == 0, (rc, logs)
+assert elapsed < 5, "an immediately-failing pull must not delay the scan (%.1fs)" % elapsed
+assert any("skipped" in ln for ln in logs), logs
+PY
+then
+    pass "a fake pull that exits with an error is skipped without blocking the scan"
+else
+    fail "failing-pull refresh case failed (see assertion above)"
+fi
+
+# convert_bom_to_spdx's sibling scanner-image path takes the same refresh branch;
+# confirm it also runs to completion with a real (fake) docker pull on PATH.
+: > "$FAKE_DOCKER_LOG"
+if SBOM_OUTPUT_DIR="$OUT" PATH="$FAKEDOCKER:$PATH" FAKE_DOCKER_LOG="$FAKE_DOCKER_LOG" \
+   FAKE_DOCKER_PULL_MODE=uptodate python3 - "$ROOT_DIR" <<'PY'
+import os, sys, time
+sys.path.insert(0, os.path.join(sys.argv[1], "docker", "web"))
+import server
+
+captured = {}
+def fake_stream(args, on_log, **kw):
+    captured["args"] = args
+    return 0
+server._stream_cmd = fake_stream
+server._sibling_image_present = lambda image: True
+server._self_container_id = lambda: "selfcid000000"
+server.docker_cli_present = lambda: True
+server.docker_capable = lambda: True
+server.spdx_convert_capable = lambda: False
+
+bom = server.OUTPUT_DIR + "/run_1/run_1_bom.json"
+spdx = server.OUTPUT_DIR + "/run_1/run_1_bom.spdx.json"
+started = time.monotonic()
+rc = server.convert_bom_to_spdx(bom, spdx, False, lambda ln: None)
+elapsed = time.monotonic() - started
+assert rc == 0, rc
+assert elapsed < 5, "an up-to-date refresh must not meaningfully delay SPDX export (%.1fs)" % elapsed
+assert "--entrypoint" in captured["args"], captured["args"]
+PY
+then
+    pass "the on-demand SPDX sibling also refreshes an already-present scanner image"
+else
+    fail "SPDX sibling refresh case failed (see assertion above)"
+fi
+
+echo "== external vulnerability lookup (GET /advisory, GET /package-advisories) =="
+# Three dedicated server instances so these tests never touch the real
+# api.osv.dev: one backed by a canned stub (success paths + input validation,
+# which must 400 before any request would be dispatched), one with the
+# feature off, one pointed at an address that refuses the connection outright
+# (the offline path, distinct from "OSV said no").
+cat > "$WORK/osv-stub.py" <<'STUBPY'
+import json, sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PORT = int(sys.argv[1])
+VULNS = {
+    "CVE-TEST-CVSS3": {
+        "id": "CVE-TEST-CVSS3", "summary": "cvss3 test", "details": "d" * 50,
+        "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+        "references": [{"url": "https://example.com/%d" % i} for i in range(20)],
+        "aliases": ["GHSA-xxxx"], "modified": "2024-01-01T00:00:00Z", "published": "2023-01-01T00:00:00Z",
+        "affected": [{"package": {"ecosystem": "npm", "name": "foo"},
+                      "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.0.0"}]}]}],
+    },
+    "CVE-TEST-DBSEV": {
+        "id": "CVE-TEST-DBSEV", "summary": "db severity test",
+        "database_specific": {"severity": "CRITICAL"},
+        "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L"}],
+    },
+    "CVE-TEST-CVSS4": {
+        "id": "CVE-TEST-CVSS4", "summary": "cvss4 only",
+        "severity": [{"type": "CVSS_V4",
+                      "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"}],
+    },
+    "CVE-TEST-LONG": {
+        "id": "CVE-TEST-LONG", "summary": "long test", "details": "x" * 5000,
+        "references": [{"url": "https://example.com/%d" % i} for i in range(50)],
+    },
+}
+QUERY = {
+    "pkg-with-more-pages": {"vulns": [VULNS["CVE-TEST-CVSS3"]], "next_page_token": "abc"},
+    "pkg-clean": {"vulns": []},
+}
+
+class Handler(BaseHTTPRequestHandler):
+    def _send(self, code, body):
+        b = json.dumps(body).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_GET(self):
+        if self.path.startswith("/v1/vulns/"):
+            v = VULNS.get(self.path[len("/v1/vulns/"):])
+            self._send(200, v) if v else self._send(404, {"code": 5, "message": "not found"})
+        else:
+            self._send(404, {})
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        body = json.loads(self.rfile.read(length) or b"{}")
+        name = (body.get("package") or {}).get("name")
+        self._send(200, QUERY.get(name, {"vulns": []}))
+
+    def log_message(self, fmt, *args):
+        pass
+
+ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+STUBPY
+
+OSVSTUB_PORT=$((PORT + 2))
+python3 "$WORK/osv-stub.py" "$OSVSTUB_PORT" > "$WORK/osv-stub.log" 2>&1 &
+OSVSTUB_PID=$!
+disown "$OSVSTUB_PID" 2>/dev/null || true
+
+PORT3=$((PORT + 3)); BASE3="http://127.0.0.1:${PORT3}"; OUT3="$WORK/out3"; mkdir -p "$OUT3"
+OSV_API_BASE="http://127.0.0.1:${OSVSTUB_PORT}" SBOM_OUTPUT_DIR="$OUT3" UI_PORT="$PORT3" \
+    python3 "$SERVER" > "$WORK/server3.log" 2>&1 &
+SRV3_PID=$!
+disown "$SRV3_PID" 2>/dev/null || true
+
+PORT4=$((PORT + 4)); BASE4="http://127.0.0.1:${PORT4}"; OUT4="$WORK/out4"; mkdir -p "$OUT4"
+EXTERNAL_LOOKUP=false OSV_API_BASE="http://127.0.0.1:1" SBOM_OUTPUT_DIR="$OUT4" UI_PORT="$PORT4" \
+    python3 "$SERVER" > "$WORK/server4.log" 2>&1 &
+SRV4_PID=$!
+disown "$SRV4_PID" 2>/dev/null || true
+
+PORT5=$((PORT + 5)); BASE5="http://127.0.0.1:${PORT5}"; OUT5="$WORK/out5"; mkdir -p "$OUT5"
+OSV_API_BASE="http://127.0.0.1:1" SBOM_OUTPUT_DIR="$OUT5" UI_PORT="$PORT5" \
+    python3 "$SERVER" > "$WORK/server5.log" 2>&1 &
+SRV5_PID=$!
+disown "$SRV5_PID" 2>/dev/null || true
+
+cleanup_osv() {
+    for p in "$OSVSTUB_PID" "$SRV3_PID" "$SRV4_PID" "$SRV5_PID"; do
+        [ -n "$p" ] && kill "$p" 2>/dev/null
+    done
+}
+trap 'cleanup_osv; cleanup2; cleanup' EXIT
+
+ready3=0
+for _ in $(seq 1 30); do
+    if curl -fsS "$BASE3/capabilities" >/dev/null 2>&1; then ready3=1; break; fi
+    kill -0 "$SRV3_PID" 2>/dev/null || { echo "[ERROR] lookup server exited early:"; cat "$WORK/server3.log"; exit 1; }
+    sleep 0.3
+done
+[ "$ready3" = 1 ] && pass "OSV-stub-backed server is up" || { fail "OSV-stub-backed server did not become ready" "$(tail -5 "$WORK/server3.log")"; exit 1; }
+for base in "$BASE4" "$BASE5"; do
+    ok=0
+    for _ in $(seq 1 30); do
+        if curl -fsS "$base/capabilities" >/dev/null 2>&1; then ok=1; break; fi
+        sleep 0.3
+    done
+    [ "$ok" = 1 ] || { fail "server at $base did not become ready"; exit 1; }
+done
+
+echo "-- input validation (400 before any OSV request is made) --"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE3/advisory?id=../../etc/passwd")
+[ "$code" = "400" ] && pass "/advisory rejects a traversal id" || fail "/advisory traversal id returned $code (expected 400)"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE3/advisory?id=")
+[ "$code" = "400" ] && pass "/advisory rejects an empty id" || fail "/advisory empty id returned $code (expected 400)"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE3/advisory?id=CVE-$(printf '1%.0s' $(seq 1 70))")
+[ "$code" = "400" ] && pass "/advisory rejects an id over 64 chars" || fail "/advisory long id returned $code (expected 400)"
+code=$(curl -s -o /dev/null -w '%{http_code}' -G "$BASE3/advisory" --data-urlencode $'id=CVE-2021-44228\r\nX-Injected: 1')
+[ "$code" = "400" ] && pass "/advisory rejects an id with CR/LF" || fail "/advisory CRLF id returned $code (expected 400)"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE3/advisory?id=UNKNOWN-1234")
+[ "$code" = "400" ] && pass "/advisory rejects an id with an unrecognized prefix" || fail "/advisory unknown-prefix id returned $code (expected 400)"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE3/package-advisories?ecosystem=bogus&name=lodash&version=4.17.20")
+[ "$code" = "400" ] && pass "/package-advisories rejects an unknown ecosystem slug" || fail "/package-advisories bogus ecosystem returned $code (expected 400)"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE3/package-advisories?ecosystem=npm&name=lodash")
+[ "$code" = "400" ] && pass "/package-advisories rejects a missing required parameter" || fail "/package-advisories missing version returned $code (expected 400)"
+code=$(curl -s -o /dev/null -w '%{http_code}' -G "$BASE3/package-advisories" --data-urlencode "ecosystem=npm" --data-urlencode $'name=lo\x01dash' --data-urlencode "version=1.0.0")
+[ "$code" = "400" ] && pass "/package-advisories rejects a control character in name" || fail "/package-advisories control-char name returned $code (expected 400)"
+
+echo "-- disabled feature: 403 with no OSV request ever attempted --"
+if curl -fsS "$BASE4/capabilities" 2>/dev/null | python3 -c "import sys,json;assert json.load(sys.stdin)['externalLookup'] is False" 2>/dev/null; then
+    pass "/capabilities reports externalLookup false when EXTERNAL_LOOKUP=false"
+else
+    fail "/capabilities externalLookup should be false"
+fi
+code=$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' "$BASE4/advisory?id=CVE-2021-44228")
+[ "$code" = "403" ] && pass "/advisory is disabled (403) and OSV_API_BASE (unreachable) is never contacted" || fail "/advisory disabled returned $code (expected 403)"
+code=$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' "$BASE4/package-advisories?ecosystem=npm&name=lodash&version=4.17.20")
+[ "$code" = "403" ] && pass "/package-advisories is disabled (403)" || fail "/package-advisories disabled returned $code (expected 403)"
+
+echo "-- offline: connection refused surfaces as 503, fast --"
+code=$(curl -s --max-time 3 -o "$WORK/osv-offline-body" -w '%{http_code}' "$BASE5/advisory?id=CVE-2021-44228")
+if [ "$code" = "503" ] && grep -q '"offline"' "$WORK/osv-offline-body"; then
+    pass "/advisory reports offline (503) when OSV cannot be reached, well under the timeout"
+else
+    fail "/advisory offline path returned $code" "$(cat "$WORK/osv-offline-body")"
+fi
+
+echo "-- successful lookups against the OSV stub --"
+body=$(curl -fsS "$BASE3/advisory?id=CVE-TEST-CVSS3" 2>/dev/null)
+if echo "$body" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d['found'] is True, d
+assert d['severity'] == 'CRITICAL', d
+assert d['cvss'] == 9.8, d
+assert d['cvssVector'] == 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', d
+assert d['source'] == 'osv', d
+assert len(d['refs']) == 12, d
+"; then
+    pass "/advisory computes a CVSS 3.1 base score from OSV's vector"
+else
+    fail "/advisory CVSS_V3 score computation failed" "$body"
+fi
+
+body=$(curl -fsS "$BASE3/advisory?id=CVE-TEST-DBSEV" 2>/dev/null)
+if echo "$body" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d['severity'] == 'CRITICAL', d
+assert d['cvss'] is None, d
+"; then
+    pass "/advisory prefers database_specific.severity over a computed score"
+else
+    fail "/advisory database_specific.severity priority failed" "$body"
+fi
+
+body=$(curl -fsS "$BASE3/advisory?id=CVE-TEST-CVSS4" 2>/dev/null)
+if echo "$body" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d['severity'] == 'UNKNOWN', d
+assert d['cvss'] is None, d
+assert d['cvssVector'].startswith('CVSS:4.0'), d
+"; then
+    pass "/advisory leaves cvss null for a CVSS_V4-only vector, but keeps the vector"
+else
+    fail "/advisory CVSS_V4-only handling failed" "$body"
+fi
+
+body=$(curl -fsS "$BASE3/advisory?id=CVE-2099-00000" 2>/dev/null)
+if echo "$body" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d == {'id': 'CVE-2099-00000', 'found': False, 'source': 'osv'}, d
+"; then
+    pass "/advisory turns an OSV 404 into a normal found:false result, not an error"
+else
+    fail "/advisory 404 handling failed" "$body"
+fi
+
+body=$(curl -fsS "$BASE3/advisory?id=CVE-TEST-LONG" 2>/dev/null)
+if echo "$body" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert len(d['description']) == 600, len(d['description'])
+assert len(d['refs']) == 12, len(d['refs'])
+"; then
+    pass "/advisory caps description and refs length"
+else
+    fail "/advisory length caps failed" "$body"
+fi
+
+body=$(curl -fsS "$BASE3/package-advisories?ecosystem=npm&name=pkg-with-more-pages&version=1.0.0" 2>/dev/null)
+if echo "$body" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d['found'] is True, d
+assert len(d['items']) == 1, d
+assert d['truncated'] is True, d
+"; then
+    pass "/package-advisories reports truncated:true when OSV returns a next_page_token"
+else
+    fail "/package-advisories truncation flag failed" "$body"
+fi
+
+body=$(curl -fsS "$BASE3/package-advisories?ecosystem=npm&name=pkg-clean&version=1.0.0" 2>/dev/null)
+if echo "$body" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d == {'found': False, 'items': [], 'truncated': False}, d
+"; then
+    pass "/package-advisories reports found:false with no vulnerabilities"
+else
+    fail "/package-advisories clean-package handling failed" "$body"
 fi
 
 echo ""

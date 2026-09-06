@@ -20,18 +20,11 @@ import { type SecuritySummary, type Severity, type VulnItem } from "@/lib/api";
 import { csvFilename, downloadCsv, toCsv, vulnCsvRows } from "@/lib/csv";
 import { buildQuery, parseQuery, type RouteQuery, scanHash } from "@/lib/route";
 import { vulnsFromQuery, vulnsToQuery } from "@/lib/section-query";
+import { severityTone } from "@/lib/severity";
 import { compareVulns, type SortDir, type VulnSortKey } from "@/lib/vulns";
 import { cn } from "@/lib/utils";
 
 import { SeverityBar } from "./SeverityBar";
-
-const TONE: Record<string, "critical" | "high" | "medium" | "low" | "info"> = {
-  CRITICAL: "critical",
-  HIGH: "high",
-  MEDIUM: "medium",
-  LOW: "low",
-  UNKNOWN: "info",
-};
 
 // Vendor/advisory disposition badge, shown beside the severity badge. `fixed`
 // reads as resolved (success); the still-open dispositions read as a caution
@@ -459,7 +452,7 @@ export function VulnerabilitiesTable({
                       ) : (
                         <span className="w-3.5 shrink-0" />
                       )}
-                      <Badge tone={TONE[v.severity] ?? "info"}>
+                      <Badge tone={severityTone(v.severity)}>
                         {t(`severity.${v.severity}`)}
                       </Badge>
                       {v.status && (
@@ -496,7 +489,7 @@ export function VulnerabilitiesTable({
                   {anyNvdSeverity && (
                     <td className="px-3 py-2">
                       {v.nvdSeverity ? (
-                        <Badge tone={TONE[v.nvdSeverity] ?? "info"}>
+                        <Badge tone={severityTone(v.nvdSeverity)}>
                           {t(`severity.${v.nvdSeverity}`)}
                         </Badge>
                       ) : (

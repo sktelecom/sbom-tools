@@ -298,6 +298,10 @@ Environment:
   COSIGN_KEY             Signing key for --sign
   SBOM_OUTPUT_FLAT       Set to 1 to write artifacts flat in the output base
                          (no per-run subfolder), matching the pre-isolation layout
+  SBOM_PULL              missing (default): refresh an already-present image in
+                         the background, bounded; an absent one is pulled as
+                         usual. always: block and re-pull every run. never:
+                         touch no network; fail if the image is absent
   SBOM_SCANNER_IMAGE     Override the scanner image
   SBOM_FIRMWARE_IMAGE    Override the firmware image
   SBOM_AIBOM_IMAGE       Override the AI SBOM (OWASP AIBOM Generator) image
@@ -315,6 +319,9 @@ Environment:
   TRUSCA_PROJECT_ID      Target TRUSCA project id (UUID, required for trusca)
   TRUSCA_REF             Ingest ref label (default: main)
   TRUSCA_RELEASE         Ingest release label (default: --version value)
+  EXTERNAL_LOOKUP        With --ui: enable the web UI's CVE/package lookup
+                         against OSV.dev (default: true; set false for
+                         air-gapped runs)
 
 Architecture: source SBOM generation uses cdxgen's per-language images
 (on-demand); this tool orchestrates + post-processes.
@@ -332,6 +339,94 @@ docker_check() {
     command -v docker &>/dev/null || { echo "[ERROR] Docker not installed."; echo "  https://www.docker.com/products/docker-desktop/"; exit 1; }
     docker info >/dev/null 2>&1 || { echo "[ERROR] Docker daemon not running. Start Docker Desktop and retry."; exit 1; }
 }
+
+# `docker run` only auto-pulls an image that is entirely ABSENT locally; once a
+# floating tag like `:latest` has been pulled once, it is reused forever even
+# after the registry publishes a newer image. That is what broke a real demo:
+# a stale cached bomlens:latest predated docker/lib/scan-figshare.py, and the
+# scan failed with "python3: can't open file scan-figshare.py" until someone
+# thought to `docker pull` by hand. ensure_image_fresh closes that gap for an
+# image that IS already present, honoring SBOM_PULL (missing/always/never;
+# see --help), without turning every run into a blocking network call — see
+# _refresh_image_quietly for how the wait is bounded. Ported from
+# electron/lib/container.mjs's refreshImageInBackground() (Node); this is the
+# bash equivalent for the CLI path.
+#
+# $1: image ref (e.g. $POSTPROCESS_IMAGE, $RUN_IMAGE)
+ensure_image_fresh() {
+    local img="$1"
+    case "$SBOM_PULL" in
+        never)
+            if ! docker image inspect "$img" >/dev/null 2>&1; then
+                echo "[ERROR] Image not found and SBOM_PULL=never (no network is touched): $img"
+                echo "        Pull it once first, or unset SBOM_PULL to let this run pull it:"
+                echo "          docker pull $img"
+                exit 1
+            fi
+            return 0
+            ;;
+        always)
+            echo "[INFO] Pulling $img (SBOM_PULL=always)..."
+            if ! docker pull "$img"; then
+                echo "[ERROR] Failed to pull $img."
+                exit 1
+            fi
+            return 0
+            ;;
+    esac
+    # missing (default): an absent image is left to `docker run`'s own implicit
+    # pull, unchanged. Only a PRESENT image is worth refreshing.
+    docker image inspect "$img" >/dev/null 2>&1 || return 0
+    _refresh_image_quietly "$img"
+}
+
+# Stall-bounded, silent `docker pull` for an image already present locally. A
+# real transfer keeps writing new lines to the log, which resets the idle
+# clock; an offline host or a blocked registry produces no output at all and
+# is killed once idle for _SBOM_PULL_STALL_SECS seconds. _SBOM_PULL_MAX_SECS
+# is a last-resort cap against a connection that trickles just enough to never
+# look stalled. Both are internal test knobs (not documented CLI/env surface).
+# Failure here — offline, killed, whatever — is silently ignored: this check
+# is a bonus freshness probe, not the scan's critical path, and the local
+# image is used either way.
+#
+# $1: image ref
+_refresh_image_quietly() {
+    local img="$1" stall max log pid elapsed idle last size
+    stall="${_SBOM_PULL_STALL_SECS:-12}"
+    max="${_SBOM_PULL_MAX_SECS:-2700}"
+    log="$(mktemp)" || return 0
+    docker pull "$img" >"$log" 2>&1 &
+    pid=$!
+    elapsed=0; idle=0; last=0
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+        size=$(wc -c <"$log" 2>/dev/null | tr -d ' ')
+        [ -n "$size" ] || size=0
+        if [ "$size" != "$last" ]; then
+            idle=0; last=$size
+        else
+            idle=$((idle + 1))
+        fi
+        if [ "$idle" -ge "$stall" ] || [ "$elapsed" -ge "$max" ]; then
+            kill "$pid" 2>/dev/null || true
+            break
+        fi
+    done
+    wait "$pid" 2>/dev/null || true
+    rm -f "$log"
+    return 0
+}
+
+# missing (default): docker run's implicit pull covers an absent image
+# unchanged; when the image is already present, ensure_image_fresh quietly
+# refreshes it (bounded, best-effort). always: unconditional blocking pull,
+# fails loudly if it can't complete. never: never touches the network at all,
+# fails loudly if the image is absent (same contract as scripts/sbom-ui.bat).
+# Declared here, before the first ensure_image_fresh caller below, so an
+# unset SBOM_PULL is never read as empty by that call.
+SBOM_PULL="${SBOM_PULL:-missing}"
 
 # ========================================================
 # Web UI mode
@@ -375,12 +470,14 @@ if [ "$UI_MODE" = "true" ]; then
     # to keep a secret, so it comes from the environment that launched the tool.
     HF_FLAGS=()
     if [ -n "$HF_TOKEN" ]; then HF_FLAGS=(-e HF_TOKEN); fi
+    ensure_image_fresh "$POSTPROCESS_IMAGE"
     exec "${DOCKER_ENV[@]}" docker run --rm "${TTY_FLAGS[@]}" -p "${UI_BIND_ADDRESS}:${UI_PORT}:8080" \
         -v "$(hostpath "$UI_BASE")":/src -v "$(hostpath "$UI_BASE")":/host-output \
         "${MOUNT_FLAGS[@]}" "${HF_FLAGS[@]}" \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -e MODE=UI -e UI_PORT=8080 -e SBOM_UI_HOST_DIR="$(hostpath "$UI_BASE")" \
-        -e SBOM_UI_SCAN_ROOTS="$SCAN_ROOTS" "$POSTPROCESS_IMAGE"
+        -e SBOM_UI_SCAN_ROOTS="$SCAN_ROOTS" -e EXTERNAL_LOOKUP="$EXTERNAL_LOOKUP" \
+        "$POSTPROCESS_IMAGE"
 fi
 [ "${#UI_MOUNTS[@]}" -eq 0 ] || { echo "[ERROR] --mount requires --ui."; exit 1; }
 
@@ -441,6 +538,11 @@ FETCH_LICENSE="${FETCH_LICENSE:-true}"
 # EPSS + CISA KEV enrichment defaults on, but the host setting must reach the
 # post-process container so SECURITY_ENRICH=false works for air-gapped runs.
 SECURITY_ENRICH="${SECURITY_ENRICH:-true}"
+# Web UI's CVE/package lookup (GET /advisory, /package-advisories) talks to
+# OSV.dev on demand; same default-on, host-setting-must-reach-the-container
+# story as SECURITY_ENRICH, but read directly by server.py rather than by
+# entrypoint.sh (see docker/web/server.py's external_lookup_capable()).
+EXTERNAL_LOOKUP="${EXTERNAL_LOOKUP:-true}"
 
 # Normalize the report language: only en (default) or ko reach the container. An
 # unknown value is a user typo, so warn and fall back to English rather than
@@ -1345,6 +1447,7 @@ if [ "$MODE" = "SOURCE" ]; then
     # scanned tree (/src) is never written to.
     # pp_env/cosign_run intentionally expand to several -e KEY=VAL tokens, so the
     # word splitting SC2046 flags here is required, not a bug.
+    ensure_image_fresh "$POSTPROCESS_IMAGE"
     export_scan_secrets
     # shellcheck disable=SC2046
     eval "$DOCKER_MSYS"docker run --rm \
@@ -1421,6 +1524,7 @@ else
             echo "[WARN] --deep-cve does not apply to the $MODE image; running without grype." >&2
         fi
     fi
+    ensure_image_fresh "$RUN_IMAGE"
     # VOL/ENVV/pp_env/cosign_run intentionally expand to multiple tokens (-v, -e
     # pairs), so the word splitting SC2046 flags here is required, not a bug.
     export_scan_secrets

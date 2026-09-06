@@ -39,6 +39,7 @@ export function ScanRunning({
   projectLabel,
   errorMessage,
   newScanHref,
+  onNewScan,
   onRetry,
   onCancel,
   deepCveEnabled,
@@ -51,6 +52,11 @@ export function ScanRunning({
   errorMessage?: string | null;
   /** Hash for the New scan screen — the always-available recovery CTA. */
   newScanHref?: string;
+  /** Reset to a blank New scan form. Needed alongside `newScanHref`: a scan
+   *  started from `#/new` that fails leaves the hash at `#/new` already, so the
+   *  anchor's own navigation fires no `hashchange` and would otherwise do
+   *  nothing. */
+  onNewScan?: () => void;
   /** Re-run the same scan; only provided when the params are safe to replay. */
   onRetry?: () => void;
   /** Stop a running scan (closes the stream; the backend ends the process). */
@@ -108,6 +114,7 @@ export function ScanRunning({
               {newScanHref && (
                 <a
                   href={newScanHref}
+                  onClick={onNewScan}
                   className={cn(
                     buttonVariants({ variant: onRetry ? "outline" : "default" }),
                   )}

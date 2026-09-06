@@ -9,6 +9,8 @@
  *   GET /results?id=<run>      → ResultFile[] (scoped to one run folder)
  *   GET /file?id=<run>&name=<n> → raw file (download / inline view)
  *   GET /scan-stream?…         → SSE: `log` (string line) + `done` (DoneEvent)
+ *   GET /advisory?id=<id>              → AdvisoryResult (one CVE/GHSA/… lookup)
+ *   GET /package-advisories?ecosystem=&name=&version= → PackageAdvisoriesResult
  *
  * Scans are isolated per run in OUTPUT_DIR/<run_id>/. The `id` carried by the
  * `done` event, each `/scans` entry and the `/scan` detail is the run_id (the
@@ -737,6 +739,12 @@ export interface Capabilities {
   /** Extra read-only scan targets from `--ui --mount <dir>`: container path
    *  (sent as the rootfs-dir scan target) + host path (shown to the user). */
   scanRoots?: { path: string; hostPath: string }[];
+  /** GET /advisory and GET /package-advisories are offerable, meaning the
+   *  server will make outbound OSV.dev requests. False in a closed-network
+   *  deployment (the whole point of the switch), so the UI hides the Lookup
+   *  entry points and the `#/lookup` route entirely rather than offering a
+   *  screen that always fails. */
+  externalLookup?: boolean;
 }
 
 /** Which input types this running image supports (firmware needs the fw image). */
@@ -1085,4 +1093,175 @@ export function startScan(params: ScanParams, handlers: ScanHandlers): EventSour
   };
 
   return es;
+}
+
+// ---------------------------------------------------------------------------
+// External vulnerability lookup (GET /advisory, GET /package-advisories)
+//
+// Both talk to OSV.dev on the server's behalf. BomLens keeps no account and
+// no database, so a lookup is a live request, not a query against bundled
+// data. `externalLookup` in Capabilities gates whether the UI offers this at
+// all; these two calls assume the caller already checked it.
+// ---------------------------------------------------------------------------
+
+/** Ecosystem slugs `GET /package-advisories?ecosystem=` accepts: the exact
+ *  keys of server.py's `_OSV_ECOSYSTEMS` map (the web-form spelling, not
+ *  OSV's own ecosystem names). */
+export type EcosystemSlug =
+  | "npm"
+  | "pypi"
+  | "maven"
+  | "go"
+  | "cargo"
+  | "rubygems"
+  | "packagist"
+  | "nuget";
+
+export const ECOSYSTEM_SLUGS: EcosystemSlug[] = [
+  "npm",
+  "pypi",
+  "maven",
+  "go",
+  "cargo",
+  "rubygems",
+  "packagist",
+  "nuget",
+];
+
+/** One package + version-range (or explicit version list) an advisory
+ *  affects. `ranges` is OSV's own range objects, passed through unshaped. */
+export interface AdvisoryAffected {
+  ecosystem: string;
+  name: string;
+  ranges?: unknown[];
+  versions?: string[];
+}
+
+/** A found advisory record: the shape of `GET /advisory` when `found` is
+ *  true, and of each entry in `GET /package-advisories`' `items`. */
+export interface AdvisoryRecord {
+  id: string;
+  found: true;
+  severity: Severity | "NONE";
+  /** CVSS 3.1 Base Score the server derived from OSV's vector, or a
+   *  vendor-stated qualitative severity with no computed score. Null when
+   *  neither is available. */
+  cvss: number | null;
+  cvssVector: string;
+  title: string;
+  description: string;
+  aliases: string[];
+  withdrawn: boolean;
+  modified: string;
+  published: string;
+  refs: string[];
+  affected: AdvisoryAffected[];
+  source: "osv";
+}
+
+/** `GET /advisory?id=…` when OSV has nothing filed under that id: a real
+ *  "no such advisory", not a failure. */
+export interface AdvisoryNotFound {
+  id: string;
+  found: false;
+  source: "osv";
+}
+
+export type AdvisoryResult = AdvisoryRecord | AdvisoryNotFound;
+
+/** `GET /package-advisories` response. `truncated` means OSV had more than
+ *  the server's capped row count, so the list shown is a prefix, not the
+ *  whole answer. */
+export interface PackageAdvisoriesResult {
+  found: boolean;
+  items: AdvisoryRecord[];
+  truncated: boolean;
+}
+
+/**
+ * Why a lookup call did not return a result, surfaced by the Lookup screen
+ * instead of a raw HTTP status. Mirrors server.py's `{error: "…"}` bodies for
+ * both endpoints, plus one client-side case:
+ *   "invalid"     : 400 (malformed id / request)
+ *   "disabled"    : 403 (externalLookup is off; the UI should never reach
+ *                   this, since it hides the entry points first)
+ *   "busy"        : 503 with a reason other than "offline" (lookup gate full)
+ *   "offline"     : 503 {error:"offline"} (the server's own network is down,
+ *                   which is expected in a closed deployment, not a failure)
+ *   "upstream"    : 502 (OSV answered, but not usably)
+ *   "unreachable" : fetch() itself threw (no server to ask at all)
+ */
+export type LookupErrorKind =
+  | "invalid"
+  | "disabled"
+  | "busy"
+  | "offline"
+  | "upstream"
+  | "unreachable";
+
+export class LookupError extends Error {
+  kind: LookupErrorKind;
+  constructor(kind: LookupErrorKind, message?: string) {
+    super(message ?? kind);
+    this.name = "LookupError";
+    this.kind = kind;
+  }
+}
+
+function lookupErrorKind(status: number, body: unknown): LookupErrorKind {
+  const error =
+    body && typeof body === "object" && "error" in (body as Record<string, unknown>)
+      ? String((body as Record<string, unknown>).error)
+      : "";
+  if (status === 403) return "disabled";
+  if (status === 503) return error === "offline" ? "offline" : "busy";
+  if (status === 502) return "upstream";
+  return "invalid"; // 400, and anything else unexpected
+}
+
+async function lookupFetch(path: string): Promise<unknown> {
+  let res: Response;
+  try {
+    res = await fetch(path);
+  } catch {
+    throw new LookupError("unreachable");
+  }
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    body = undefined;
+  }
+  if (!res.ok) {
+    const message =
+      body && typeof body === "object" && "error" in (body as Record<string, unknown>)
+        ? String((body as Record<string, unknown>).error)
+        : undefined;
+    throw new LookupError(lookupErrorKind(res.status, body), message);
+  }
+  return body;
+}
+
+/**
+ * Look up one advisory by id (CVE-…/GHSA-…/GO-…/PYSEC-…/RUSTSEC-…/OSV-…/GSD-…/
+ * MAL-…). Throws `LookupError` on anything but a 200, including the static
+ * demo, which has no server to ask.
+ */
+export async function getAdvisory(id: string): Promise<AdvisoryResult> {
+  if (IS_STATIC_DEMO) throw new LookupError("disabled");
+  return (await lookupFetch(`/advisory?id=${encodeURIComponent(id)}`)) as AdvisoryResult;
+}
+
+/**
+ * Look up known advisories against one package + version. Throws
+ * `LookupError` on anything but a 200, including the static demo.
+ */
+export async function getPackageAdvisories(
+  ecosystem: EcosystemSlug,
+  name: string,
+  version: string,
+): Promise<PackageAdvisoriesResult> {
+  if (IS_STATIC_DEMO) throw new LookupError("disabled");
+  const qs = new URLSearchParams({ ecosystem, name, version });
+  return (await lookupFetch(`/package-advisories?${qs.toString()}`)) as PackageAdvisoriesResult;
 }

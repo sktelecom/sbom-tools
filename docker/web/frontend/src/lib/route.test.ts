@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildHash, homeHash, newHash, parseHash, scanHash } from "./route";
+import { buildHash, homeHash, lookupHash, newHash, parseHash, scanHash } from "./route";
 
 describe("parseHash", () => {
   it("treats empty / bare slash as Recent (home)", () => {
@@ -30,6 +30,15 @@ describe("parseHash", () => {
       kind: "scan",
       id: "demo_1.0",
       section: "components",
+    });
+  });
+
+  it("parses the External lookup screen, with or without a term", () => {
+    expect(parseHash("#/lookup")).toEqual({ kind: "lookup" });
+    expect(parseHash("#lookup")).toEqual({ kind: "lookup" });
+    expect(parseHash("#/lookup?q=CVE-2021-44228")).toEqual({
+      kind: "lookup",
+      query: { q: "CVE-2021-44228" },
     });
   });
 
@@ -65,6 +74,16 @@ describe("buildHash / scanHash / homeHash / newHash", () => {
   it("builds the New scan hash", () => {
     expect(newHash()).toBe("#/new");
     expect(buildHash({ kind: "new" })).toBe("#/new");
+  });
+
+  it("builds the External lookup hash, bare or with a term", () => {
+    expect(lookupHash()).toBe("#/lookup");
+    expect(buildHash({ kind: "lookup" })).toBe("#/lookup");
+    expect(lookupHash("CVE-2021-44228")).toBe("#/lookup?q=CVE-2021-44228");
+    expect(parseHash(lookupHash("pkg:npm/lodash@4.17.21"))).toEqual({
+      kind: "lookup",
+      query: { q: "pkg:npm/lodash@4.17.21" },
+    });
   });
 
   it("omits the section for Overview", () => {

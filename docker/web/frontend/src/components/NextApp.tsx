@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { AppShell } from "./AppShell";
+import { ExternalLookup } from "./ExternalLookup";
 import { GlobalSearch } from "./GlobalSearch";
 import { NewScan } from "./NewScan";
 import { ProgressLog } from "./ProgressLog";
@@ -26,13 +27,21 @@ import {
   type ScanProgress,
   type Severity,
 } from "@/lib/api";
+import { IS_STATIC_DEMO } from "@/lib/demo";
 import { type LicenseRiskTier } from "@/lib/licenses";
 import {
   type RecentScanLink,
   type SectionId,
   visibleSectionIds,
 } from "@/lib/nav";
-import { homeHash, newHash, parseHash, scanHash, type RouteQuery } from "@/lib/route";
+import {
+  homeHash,
+  lookupHash,
+  newHash,
+  parseHash,
+  scanHash,
+  type RouteQuery,
+} from "@/lib/route";
 import { deriveScanContext, sectionCounts } from "@/lib/results";
 import { useToast } from "@/lib/toast";
 
@@ -110,12 +119,17 @@ export function NextApp() {
   // taking it as a dependency and being rebuilt on every section change.
   const activeSectionRef = useRef(activeSection);
   activeSectionRef.current = activeSection;
-  // Which idle screen is shown: Recent scans (home/logo) or New scan (#/new).
-  const [homeView, setHomeView] = useState<"recent" | "new">("recent");
+  // Which idle screen is shown: Recent scans (home/logo), New scan (#/new) or
+  // External lookup (#/lookup).
+  const [homeView, setHomeView] = useState<"recent" | "new" | "lookup">("recent");
   const [capabilities, setCapabilities] = useState<Capabilities>({
     firmware: false,
     docker: true,
   });
+  // Mirrored so `route()` can read the latest capabilities without taking
+  // them as a dependency, for the same reason `activeSectionRef` exists below.
+  const capabilitiesRef = useRef(capabilities);
+  capabilitiesRef.current = capabilities;
   const [recent, setRecent] = useState<RecentScan[]>([]);
   // The scan a delete button asked to remove, waiting on the confirm dialog.
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
@@ -157,7 +171,19 @@ export function NextApp() {
   const refreshRecent = () => listScans().then(setRecent);
 
   useEffect(() => {
-    getCapabilities().then(setCapabilities);
+    getCapabilities().then((caps) => {
+      setCapabilities(caps);
+      // setCapabilities only schedules the re-render that would refresh
+      // capabilitiesRef; writing it directly here means route(), called on
+      // the very next line, already sees the real value instead of the
+      // still-stale default from before this render.
+      capabilitiesRef.current = caps;
+      // A deep-linked `#/lookup` parsed before capabilities arrived cannot
+      // yet know whether externalLookup is on, so re-run the router now that
+      // it does: a genuinely-off build still bounces home (see route()'s
+      // "false, not undefined" check below).
+      routeRef.current();
+    });
     void refreshRecent();
   }, []);
 
@@ -212,6 +238,19 @@ export function NextApp() {
     [recent],
   );
 
+  // Switch to one of the idle home views (Recent or New scan), resetting any
+  // loaded/running scan state first. Shared by the hash router (on a `#/` or
+  // `#/new` navigation) and by the "New scan" controls below, which must reset
+  // the same way even when the hash is already `#/new` and so fires no
+  // `hashchange` (see goToNewScan).
+  const enterHome = useCallback(
+    (kind: "recent" | "new") => {
+      setHomeView(kind);
+      if (loadedIdRef.current !== null || status !== "idle") resetToHome();
+    },
+    [status, resetToHome],
+  );
+
   // The hash router: parse on mount and on every hashchange. Skip while a live
   // scan is running — that view is owned by the run() state machine, not the URL
   // (there is no id yet), and run()'s done handler sets the URL when it finishes.
@@ -219,13 +258,39 @@ export function NextApp() {
     if (status === "running") return;
     const parsed = parseHash(window.location.hash);
     if (parsed.kind === "recent" || parsed.kind === "new") {
-      setHomeView(parsed.kind);
+      enterHome(parsed.kind);
+      return;
+    }
+    if (parsed.kind === "lookup") {
+      // Only bounce on a definite "off": capabilities start undefined until
+      // getCapabilities() resolves, and treating "not yet loaded" the same as
+      // "disabled" would drop a deep link raced against that first fetch.
+      if (capabilitiesRef.current.externalLookup === false || IS_STATIC_DEMO) {
+        window.location.hash = homeHash();
+        return;
+      }
+      setHomeView("lookup");
+      setSectionQuery(parsed.query ?? {});
       if (loadedIdRef.current !== null || status !== "idle") resetToHome();
       return;
     }
     setSectionQuery(parsed.query ?? {});
     showScan(parsed.id, parsed.section);
-  }, [status, resetToHome, showScan]);
+  }, [status, enterHome, showScan]);
+
+  // Explicit "New scan" affordances (TopBar, Sidebar, the failed-scan error
+  // card) call this directly instead of relying solely on the `<a href="#/new">`
+  // they still carry. A scan started from `#/new` that then fails (no `done`
+  // event, so the URL never moved off `#/new`) leaves the hash unchanged when
+  // one of these is clicked, so the browser fires no `hashchange` and the
+  // router above never re-runs. Resetting state here first makes the click work
+  // either way; setting the hash afterwards is a no-op when it's already
+  // `#/new` and a normal navigation otherwise (harmless if it re-triggers the
+  // router — state is already reset, so that second pass does nothing further).
+  const goToNewScan = useCallback(() => {
+    enterHome("new");
+    if (window.location.hash !== newHash()) window.location.hash = newHash();
+  }, [enterHome]);
 
   // Run the router on mount and on real navigations (hashchange) only — never on
   // a bare status change. Re-running it on status change would, when a scan
@@ -351,6 +416,22 @@ export function NextApp() {
     }
   };
 
+  // A GlobalSearch "look it up externally" pick routes to the Lookup screen
+  // with the term in the URL; the screen itself makes the request, not this
+  // handler, so typing never fires one.
+  const handleLookupPick = (term: string) => {
+    window.location.hash = lookupHash(term);
+  };
+
+  // The Lookup screen ran a query, so reflect it in the URL (replaced, not
+  // pushed, same reasoning as handleQueryChange below) so the result is a
+  // shareable link without the screen touching the hash itself.
+  const handleLookupQueryChange = useCallback((term: string) => {
+    const next = lookupHash(term || undefined);
+    if (next === window.location.hash) return;
+    window.history.replaceState(null, "", next);
+  }, []);
+
   // An Overview risk-bar click, or a name picked out of a result table, routes
   // into the section with that filter applied.
   const handleFilterPick = (
@@ -387,6 +468,11 @@ export function NextApp() {
   );
 
   const isHome = status === "idle";
+  // Every entry point into the Lookup screen (this hash, the top-bar icon,
+  // the GlobalSearch row) is gated the same way: the server won't make
+  // outbound requests when externalLookup is off, and the static demo has no
+  // server to ask at all.
+  const lookupEnabled = Boolean(capabilities.externalLookup) && !IS_STATIC_DEMO;
   // A failed run can be retried as-is only when its params carry no single-use
   // upload token or stashed credential (those are consumed on first use).
   const retryParams = lastParamsRef.current;
@@ -409,9 +495,17 @@ export function NextApp() {
       showSections={Boolean(result)}
       homeHref={homeHash()}
       showHomeLink={!(isHome && homeView === "recent")}
+      lookupHref={lookupEnabled ? lookupHash() : undefined}
+      onNewScan={goToNewScan}
       project={isHome ? undefined : projectInfo}
       search={
-        result ? <GlobalSearch result={result} onPick={handleSearchPick} /> : undefined
+        result ? (
+          <GlobalSearch
+            result={result}
+            onPick={handleSearchPick}
+            onLookup={lookupEnabled ? handleLookupPick : undefined}
+          />
+        ) : undefined
       }
       onRescan={
         result?.scanConfig ? () => handleRescan(result.scanConfig!) : undefined
@@ -424,6 +518,11 @@ export function NextApp() {
               scans={recent}
               newHref={newHash()}
               onDelete={setPendingDelete}
+            />
+          ) : homeView === "lookup" ? (
+            <ExternalLookup
+              initialQuery={sectionQuery.q}
+              onQueryChange={handleLookupQueryChange}
             />
           ) : (
             <NewScan
@@ -449,6 +548,7 @@ export function NextApp() {
             }
             errorMessage={scanError}
             newScanHref={newHash()}
+            onNewScan={goToNewScan}
             deepCveEnabled={retryParams?.deepCve}
             onRetry={
               canRetry && retryParams ? () => run(retryParams) : undefined

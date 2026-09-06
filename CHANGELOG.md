@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.11.8] - 2026-09-07
+
+### Added
+
+- The web UI can look up a CVE/GHSA/etc. advisory id, or check a package version for known vulnerabilities, on demand against OSV.dev, reachable from the top bar or from a search whose term looks like an advisory id, with or without a scan loaded, and as a shareable link. `EXTERNAL_LOOKUP=false` removes it entirely for a closed network.
+
+### Fixed
+
+- A scan started from the New scan screen that then failed left every "New scan" control (the top bar, the rail, and the error card's own button) unresponsive: the hash never moved off `#/new`, so none of them fired the navigation event the reset depended on. Clicking any of them now resets the form regardless.
+- The CLI's own scanner image, the web UI's container, and the sibling firmware/AI-model/deep-CVE images it launches reused a cached image forever once one had been pulled, even after the registry published a newer one (a stale local image once caused a scan to fail outright). Each now quietly checks for an update before a run, bounded so a slow or offline registry never delays or blocks the scan.
+- Creative Commons licenses (`CC-BY-4.0` and its variants), common on datasets and AI models, always fell to Uncategorized in the license-risk classification because it only recognized software copyleft families. Share-Alike variants now classify as weak-copyleft and plain attribution as permissive.
+
 ## [v1.11.7] - 2026-09-04
 
 ### Added

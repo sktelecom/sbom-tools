@@ -1,12 +1,13 @@
 // Copyright 2026 SK Telecom Co., Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Boxes, Search, ShieldAlert } from "lucide-react";
+import { Boxes, ScanSearch, Search, ShieldAlert } from "lucide-react";
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/input";
 import type { DoneEvent } from "@/lib/api";
+import { parseLookupInput } from "@/lib/lookup";
 import type { SectionId } from "@/lib/nav";
 import { searchScan } from "@/lib/search";
 
@@ -30,10 +31,20 @@ function isAppleKeyboard() {
 export function GlobalSearch({
   result,
   onPick,
+  onLookup,
 }: {
   result: DoneEvent;
   /** Navigate to a section with the chosen term applied to its search. */
   onPick: (section: SectionId, term: string) => void;
+  /**
+   * Route to the External lookup screen (`#/lookup?q=…`) with the typed term.
+   * Absent hides the row entirely, which is how the caller says
+   * `capabilities.externalLookup` is off (or this is the static demo)
+   * without this component needing to know why. Never called on every
+   * keystroke: picking this row only navigates, the destination screen makes
+   * the actual request.
+   */
+  onLookup?: (term: string) => void;
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -46,12 +57,25 @@ export function GlobalSearch({
   const { components, vulns } = searchScan(result, query);
   const hasResults = components.length > 0 || vulns.length > 0;
   const show = open && query.trim().length > 0;
+  // Offered when the term looks like an advisory id (CVE/GHSA/…), since this
+  // scan's own inventory can't answer that, or when nothing here matched at all.
+  const trimmedQuery = query.trim();
+  const showLookup =
+    Boolean(onLookup) &&
+    show &&
+    (parseLookupInput(trimmedQuery).kind === "advisory" || !hasResults);
 
-  // One flat list so arrow keys cross the group boundary without special cases.
-  const options: { section: SectionId; term: string }[] = [
-    ...components.map((c) => ({ section: "components" as SectionId, term: c.name })),
-    ...vulns.map((v) => ({ section: "vulnerabilities" as SectionId, term: v.id })),
+  // One flat list so arrow keys cross every group boundary without special
+  // cases; the lookup row (when offered) is always last.
+  type Option =
+    | { kind: "pick"; section: SectionId; term: string }
+    | { kind: "lookup"; term: string };
+  const options: Option[] = [
+    ...components.map((c) => ({ kind: "pick" as const, section: "components" as SectionId, term: c.name })),
+    ...vulns.map((v) => ({ kind: "pick" as const, section: "vulnerabilities" as SectionId, term: v.id })),
+    ...(showLookup ? [{ kind: "lookup" as const, term: trimmedQuery }] : []),
   ];
+  const lookupIdx = showLookup ? options.length - 1 : -1;
   // A shrinking result set can strand the index past the end.
   const activeIdx = active >= 0 && active < options.length ? active : -1;
 
@@ -59,9 +83,11 @@ export function GlobalSearch({
   const optionId = (i: number) => `${baseId}-opt-${i}`;
   const componentsHeadingId = `${baseId}-h-components`;
   const vulnsHeadingId = `${baseId}-h-vulns`;
+  const lookupHeadingId = `${baseId}-h-lookup`;
 
-  const pick = (section: SectionId, term: string) => {
-    onPick(section, term);
+  const activate = (opt: Option) => {
+    if (opt.kind === "lookup") onLookup?.(opt.term);
+    else onPick(opt.section, opt.term);
     setQuery("");
     setOpen(false);
     setActive(-1);
@@ -120,7 +146,7 @@ export function GlobalSearch({
     } else if (e.key === "Enter") {
       // No arrowing yet: Enter takes the first result, as it always has.
       const target = options[activeIdx] ?? options[0];
-      if (target) pick(target.section, target.term);
+      if (target) activate(target);
     }
   };
 
@@ -179,7 +205,7 @@ export function GlobalSearch({
             window.clearTimeout(blurTimer.current);
           }}
         >
-          {!hasResults ? (
+          {!hasResults && !showLookup ? (
             <p className="px-3 py-3 text-sm text-muted-foreground">{t("search.none")}</p>
           ) : (
             <div className="max-h-80 overflow-auto py-1 text-sm">
@@ -197,7 +223,7 @@ export function GlobalSearch({
                       id={optionId(i)}
                       role="option"
                       aria-selected={i === activeIdx}
-                      onClick={() => pick("components", c.name)}
+                      onClick={() => activate({ kind: "pick", section: "components", term: c.name })}
                       className={optionClass(i)}
                     >
                       <Boxes className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -223,7 +249,7 @@ export function GlobalSearch({
                       id={optionId(components.length + i)}
                       role="option"
                       aria-selected={components.length + i === activeIdx}
-                      onClick={() => pick("vulnerabilities", v.id)}
+                      onClick={() => activate({ kind: "pick", section: "vulnerabilities", term: v.id })}
                       className={optionClass(components.length + i)}
                     >
                       <ShieldAlert
@@ -234,6 +260,28 @@ export function GlobalSearch({
                       <span className="shrink-0 text-xs text-muted-foreground">{v.pkg}</span>
                     </div>
                   ))}
+                </div>
+              )}
+              {showLookup && (
+                <div role="group" aria-labelledby={lookupHeadingId}>
+                  <div
+                    id={lookupHeadingId}
+                    className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                  >
+                    {t("search.lookupGroup")}
+                  </div>
+                  <div
+                    id={optionId(lookupIdx)}
+                    role="option"
+                    aria-selected={lookupIdx === activeIdx}
+                    onClick={() => activate({ kind: "lookup", term: trimmedQuery })}
+                    className={optionClass(lookupIdx)}
+                  >
+                    <ScanSearch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="truncate">
+                      {t("search.lookupExternal", { term: trimmedQuery })}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>

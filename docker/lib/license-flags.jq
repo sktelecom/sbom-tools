@@ -51,6 +51,18 @@ def permissive_ids: ["MIT","MIT-0","ISC","0BSD","BSD-2-CLAUSE","BSD-3-CLAUSE","A
 # strong-copyleft warns about an obligation the component does not impose. The
 # GPL prefix keeps the test narrow: "Apache-2.0 WITH LLVM-exception" is permissive
 # and must not be pulled up into copyleft by the word WITH alone.
+#
+# Creative Commons (datasets and AI models carry these, not software licenses):
+# the axis here is copyleft strength, not content-licensing terms in general, so
+# only the one CC clause with a copyleft-like effect matters — Share-Alike, which
+# obligates a derivative to carry the same license, the same way LGPL/MPL do for
+# modified files. CC-BY-SA is matched before the bare CC-BY test for the same
+# reason AGPL/LGPL precede GPL: the more specific pattern first. Plain CC-BY (and
+# CC-BY-NC, CC-BY-ND) impose attribution or a field-of-use limit but never
+# propagate the license, so they land on permissive for THIS axis — a
+# non-commercial restriction is a real limitation, but flagging it is
+# license_flag's job (bomlens:licenseReview), not this one's; CC-BY-NC is
+# already caught there. CC-BY-ND is not, and neither axis currently says so.
 def license_class($s):
   (($s // "") | sub("^\\s+"; "") | sub("\\s+$"; "")) as $id
   | if $id == "" then "uncategorized"
@@ -58,8 +70,10 @@ def license_class($s):
     elif ($id | test("\\bAGPL"; "i")) then "network-copyleft"
     elif ($id | test("\\bLGPL"; "i")) then "weak-copyleft"
     elif ($id | test("\\b(MPL|EPL|CDDL|CPL|OSL|EUPL|CeCILL|Sleepycat)\\b"; "i")) then "weak-copyleft"
+    elif ($id | test("\\bCC-BY-(NC-)?SA\\b"; "i")) then "weak-copyleft"
     elif ($id | test("\\bGPL.*(\\bWITH\\b|-with-.*-exception)"; "i")) then "weak-copyleft"
     elif ($id | test("\\bGPL"; "i")) then "strong-copyleft"
+    elif ($id | test("\\bCC-BY\\b"; "i")) then "permissive"
     else "uncategorized" end;
 
 # Worst-of ranking across a component's licenses (licenses.ts TIER_RANK):

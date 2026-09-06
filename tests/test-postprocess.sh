@@ -572,6 +572,32 @@ lclassx() { jq -r --arg n "$1" '.components[] | select(.name==$n)
 # The exception test is anchored on GPL: the word WITH alone must not pull a
 # non-GPL license up into copyleft.
 [ "$(lclassx with-noise-lib)" = "uncategorized" ] && pass "a non-GPL license carrying WITH is not pulled into copyleft" || fail "with-noise-lib class='$(lclassx with-noise-lib)', expected uncategorized"
+
+# Creative Commons: datasets and AI models carry these, not software licenses.
+# Only Share-Alike propagates the license (the one CC clause with a
+# copyleft-like effect); attribution and field-of-use limits (NC, ND) do not.
+# Own fixture, same reason as lcx.json: keep lc.json's counts stable for the
+# risk-report assertions that reuse it.
+cat > "$WORK/lccc.json" <<'JSON'
+{"bomFormat":"CycloneDX","specVersion":"1.6","components":[
+ {"type":"data","name":"cc-by-lib","version":"1.0","licenses":[{"license":{"id":"CC-BY-4.0"}}]},
+ {"type":"data","name":"cc-by-nc-lib","version":"1.0","licenses":[{"license":{"id":"CC-BY-NC-4.0"}}]},
+ {"type":"data","name":"cc-by-nd-lib","version":"1.0","licenses":[{"license":{"id":"CC-BY-ND-4.0"}}]},
+ {"type":"data","name":"cc-by-sa-lib","version":"1.0","licenses":[{"license":{"id":"CC-BY-SA-4.0"}}]},
+ {"type":"data","name":"cc-by-nc-sa-lib","version":"1.0","licenses":[{"license":{"id":"CC-BY-NC-SA-4.0"}}]},
+ {"type":"data","name":"cc0-lib","version":"1.0","licenses":[{"license":{"id":"CC0-1.0"}}]}
+]}
+JSON
+bash "$LIB/normalize-sbom.sh" "$WORK/lccc.json" >/dev/null 2>&1
+lclasscc() { jq -r --arg n "$1" '.components[] | select(.name==$n)
+    | [(.properties // [])[] | select(.name=="bomlens:licenseClass") | .value] | first // "ABSENT"' "$WORK/lccc.json"; }
+[ "$(lclasscc cc-by-lib)" = "permissive" ] && pass "CC-BY -> permissive (attribution only, no propagation)" || fail "cc-by-lib class='$(lclasscc cc-by-lib)', expected permissive"
+[ "$(lclasscc cc-by-nc-lib)" = "permissive" ] && pass "CC-BY-NC -> permissive on this axis (NC is licenseReview's concern)" || fail "cc-by-nc-lib class='$(lclasscc cc-by-nc-lib)', expected permissive"
+[ "$(lclasscc cc-by-nd-lib)" = "permissive" ] && pass "CC-BY-ND -> permissive on this axis" || fail "cc-by-nd-lib class='$(lclasscc cc-by-nd-lib)', expected permissive"
+[ "$(lclasscc cc-by-sa-lib)" = "weak-copyleft" ] && pass "CC-BY-SA -> weak-copyleft (Share-Alike propagates, matched before bare CC-BY)" || fail "cc-by-sa-lib class='$(lclasscc cc-by-sa-lib)', expected weak-copyleft"
+[ "$(lclasscc cc-by-nc-sa-lib)" = "weak-copyleft" ] && pass "CC-BY-NC-SA -> weak-copyleft (SA still propagates alongside NC)" || fail "cc-by-nc-sa-lib class='$(lclasscc cc-by-nc-sa-lib)', expected weak-copyleft"
+[ "$(lclasscc cc0-lib)" = "permissive" ] && pass "CC0 -> permissive (allowlist match, unchanged)" || fail "cc0-lib class='$(lclasscc cc0-lib)', expected permissive"
+
 # A licenseReview-flagged component still gets a class: the two properties coexist.
 lr=$(jq -r '.components[] | select(.name=="llama-model")
     | [(.properties // [])[] | select(.name=="bomlens:licenseReview") | .value] | first // "ABSENT"' "$WORK/lc.json")

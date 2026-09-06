@@ -9,6 +9,8 @@
  * Scheme:
  *   `#/`                          → Recent scans (home / logo target)
  *   `#/new`                       → the New scan screen
+ *   `#/lookup`                    → the External lookup screen
+ *   `#/lookup?q=<term>`           → that screen, prefilled and auto-run
  *   `#/scan/<id>`                 → a scan's Overview
  *   `#/scan/<id>/<section>`       → a scan's specific section
  *   `#/scan/<id>/<section>?…`     → that section with its filters applied
@@ -31,6 +33,9 @@ export type RouteQuery = Readonly<Record<string, string>>;
 export type Route =
   | { kind: "recent" }
   | { kind: "new" }
+  /** The External lookup screen. `query.q`, when present, is the term to
+   *  prefill and look up immediately (a shared link or a GlobalSearch pick). */
+  | { kind: "lookup"; query?: RouteQuery }
   | { kind: "scan"; id: string; section: SectionId; query?: RouteQuery };
 
 const DEFAULT_SECTION: SectionId = "overview";
@@ -52,6 +57,9 @@ export function parseHash(hash: string): Route {
 
   const parts = h.split("/");
   if (parts[0] === "new") return { kind: "new" };
+  if (parts[0] === "lookup") {
+    return query && Object.keys(query).length ? { kind: "lookup", query } : { kind: "lookup" };
+  }
   if (parts[0] === "scan" && parts[1]) {
     const id = safeDecode(parts[1]);
     if (id) {
@@ -67,6 +75,10 @@ export function parseHash(hash: string): Route {
 export function buildHash(route: Route): string {
   if (route.kind === "recent") return "#/";
   if (route.kind === "new") return "#/new";
+  if (route.kind === "lookup") {
+    const q = buildQuery(route.query);
+    return q ? `#/lookup?${q}` : "#/lookup";
+  }
   const path = `#/scan/${encodeURIComponent(route.id)}`;
   const base =
     route.section && route.section !== DEFAULT_SECTION
@@ -112,6 +124,13 @@ export function homeHash(): string {
 /** Hash for the New scan screen. */
 export function newHash(): string {
   return "#/new";
+}
+
+/** Hash for the External lookup screen. Pass a term (a CVE/GHSA id, a purl, a
+ *  package name) to land there prefilled and looked up immediately, which is
+ *  what a GlobalSearch pick and a shared link both produce. */
+export function lookupHash(term?: string): string {
+  return buildHash({ kind: "lookup", query: term ? { q: term } : undefined });
 }
 
 function safeDecode(s: string): string {

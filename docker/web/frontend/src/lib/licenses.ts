@@ -107,6 +107,18 @@ const PERMISSIVE = new Set([
 /**
  * Classify a single license id by copyleft strength. Order matters: AGPL and
  * LGPL are matched before the bare GPL test so they don't fall to strong.
+ *
+ * Creative Commons (datasets and AI models carry these, not software licenses):
+ * the axis here is copyleft strength, not content-licensing terms in general, so
+ * only the one CC clause with a copyleft-like effect matters — Share-Alike, which
+ * obligates a derivative to carry the same license, the same way LGPL/MPL do for
+ * modified files. CC-BY-SA is matched before the bare CC-BY test for the same
+ * reason AGPL/LGPL precede GPL: the more specific pattern first. Plain CC-BY (and
+ * CC-BY-NC, CC-BY-ND) impose attribution or a field-of-use limit but never
+ * propagate the license, so they land on permissive for THIS axis — a
+ * non-commercial restriction is a real limitation, but flagging it is
+ * license_flag's job (bomlens:licenseReview), not this one's; CC-BY-NC is
+ * already caught there. CC-BY-ND is not, and neither axis currently says so.
  */
 export function licenseRiskTier(license: string): LicenseRiskTier {
   const id = license.trim();
@@ -116,6 +128,7 @@ export function licenseRiskTier(license: string): LicenseRiskTier {
   if (/\bLGPL/i.test(id)) return "weak-copyleft";
   if (/\b(MPL|EPL|CDDL|CPL|OSL|EUPL|CeCILL|Sleepycat)\b/i.test(id))
     return "weak-copyleft";
+  if (/\bCC-BY-(NC-)?SA\b/i.test(id)) return "weak-copyleft";
   // A GPL carrying an exception clause, before the bare GPL test. The clause exists
   // precisely to permit linking the bare license would forbid (the classpath exception
   // on jakarta/javax APIs and OpenJDK is the common one), so strong-copyleft would warn
@@ -123,6 +136,7 @@ export function licenseRiskTier(license: string): LicenseRiskTier {
   // "Apache-2.0 WITH LLVM-exception" must not be pulled into copyleft by WITH alone.
   if (/\bGPL.*(\bWITH\b|-with-.*-exception)/i.test(id)) return "weak-copyleft";
   if (/\bGPL/i.test(id)) return "strong-copyleft";
+  if (/\bCC-BY\b/i.test(id)) return "permissive";
   return "uncategorized";
 }
 

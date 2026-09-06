@@ -396,7 +396,8 @@
     "HIGH": "High",
     "MEDIUM": "Medium",
     "LOW": "Low",
-    "UNKNOWN": "Unknown"
+    "UNKNOWN": "Unknown",
+    "NONE": "None"
   },
   "viewer": {
     "open": "결과물 보기",
@@ -444,7 +445,8 @@
     "helpDemo": "온라인 데모",
     "helpVersion": "버전 {{version}}",
     "helpVersionUnknown": "이 빌드에는 버전이 기록되지 않았습니다",
-    "conformanceSplitTitle": "측정한 필수 검사 중 통과한 개수"
+    "conformanceSplitTitle": "측정한 필수 검사 중 통과한 개수",
+    "lookupTitle": "외부 취약점 조회"
   },
   "shell": {
     "newScan": "새 스캔",
@@ -457,7 +459,48 @@
     "placeholder": "컴포넌트, CVE 검색…",
     "none": "일치 항목 없음",
     "components": "컴포넌트",
-    "vulnerabilities": "취약점"
+    "vulnerabilities": "취약점",
+    "lookupGroup": "외부 조회",
+    "lookupExternal": "OSV.dev에서 \"{{term}}\" 조회"
+  },
+  "lookup": {
+    "title": "외부 취약점 조회",
+    "subtitle": "CVE/GHSA ID나 purl, 또는 패키지 이름과 버전으로 OSV.dev에 실시간으로 조회합니다. 로컬 데이터가 아닙니다.",
+    "inputLabel": "CVE, GHSA, purl, 또는 패키지 이름",
+    "inputPlaceholder": "CVE-2021-44228, pkg:npm/lodash@4.17.21, 또는 패키지 이름",
+    "ecosystemLabel": "생태계",
+    "ecosystemPlaceholder": "생태계 선택",
+    "versionLabel": "버전",
+    "versionPlaceholder": "예: 4.17.21",
+    "submit": "조회",
+    "searching": "조회 중…",
+    "unsupportedPurl": "지원하지 않는 패키지 유형입니다: {{type}}",
+    "notFound": "OSV.dev 카탈로그에 없음",
+    "notFoundHint": "목록에 없다고 안전하다는 뜻은 아닙니다. 어떤 취약점 데이터베이스도 모든 취약점을 담고 있지는 않습니다.",
+    "packageClean": "이 버전에 알려진 취약점이 없습니다",
+    "errorInvalid": "올바른 ID, purl, 또는 패키지 + 버전 형식이 아닙니다.",
+    "errorOffline": "이 서버가 OSV.dev에 접속할 수 없습니다. 폐쇄망 환경에서는 정상입니다. 접속이 가능해지기 전까지 조회는 실패합니다.",
+    "errorUpstream": "OSV.dev가 정상적으로 응답하지 않았습니다. 잠시 후 다시 시도하세요.",
+    "errorBusy": "지금은 조회 요청이 많습니다. 잠시 후 다시 시도하세요.",
+    "errorUnreachable": "이 조회를 위해 서버에 접속할 수 없습니다.",
+    "truncated": "OSV.dev가 여기 표시된 것보다 더 많은 취약점을 보고했습니다.",
+    "withdrawn": "철회됨",
+    "aliases": "다른 이름",
+    "affected": "영향받는 범위",
+    "references": "참고 링크",
+    "cvss": "CVSS",
+    "published": "발행일",
+    "modified": "수정일",
+    "ecosystem": {
+      "npm": "npm",
+      "pypi": "PyPI",
+      "maven": "Maven",
+      "go": "Go",
+      "cargo": "crates.io",
+      "rubygems": "RubyGems",
+      "packagist": "Packagist",
+      "nuget": "NuGet"
+    }
   },
   "newscan": {
     "title": "무엇을 스캔할까요?",

@@ -396,7 +396,8 @@
     "HIGH": "High",
     "MEDIUM": "Medium",
     "LOW": "Low",
-    "UNKNOWN": "Unknown"
+    "UNKNOWN": "Unknown",
+    "NONE": "None"
   },
   "viewer": {
     "open": "View artifact",
@@ -444,7 +445,8 @@
     "helpDemo": "Live demo",
     "helpVersion": "Version {{version}}",
     "helpVersionUnknown": "Version not stamped in this build",
-    "conformanceSplitTitle": "Mandatory checks passed, out of the mandatory checks measured"
+    "conformanceSplitTitle": "Mandatory checks passed, out of the mandatory checks measured",
+    "lookupTitle": "External vulnerability lookup"
   },
   "shell": {
     "newScan": "New scan",
@@ -457,7 +459,48 @@
     "placeholder": "Search components, CVEs…",
     "none": "No matches",
     "components": "Components",
-    "vulnerabilities": "Vulnerabilities"
+    "vulnerabilities": "Vulnerabilities",
+    "lookupGroup": "External lookup",
+    "lookupExternal": "Look up \"{{term}}\" on OSV.dev"
+  },
+  "lookup": {
+    "title": "External vulnerability lookup",
+    "subtitle": "Check a CVE/GHSA id, a purl, or a package name and version against OSV.dev, live, with nothing cached locally.",
+    "inputLabel": "CVE, GHSA, purl, or package name",
+    "inputPlaceholder": "CVE-2021-44228, pkg:npm/lodash@4.17.21, or a package name",
+    "ecosystemLabel": "Ecosystem",
+    "ecosystemPlaceholder": "Select an ecosystem",
+    "versionLabel": "Version",
+    "versionPlaceholder": "e.g. 4.17.21",
+    "submit": "Look up",
+    "searching": "Looking up…",
+    "unsupportedPurl": "Unsupported package type: {{type}}",
+    "notFound": "Not in the OSV.dev catalog",
+    "notFoundHint": "Not being listed doesn't mean it's safe; no advisory database's coverage is exhaustive.",
+    "packageClean": "No known advisories against this version",
+    "errorInvalid": "That doesn't look like a valid id, purl, or package + version.",
+    "errorOffline": "This server can't reach OSV.dev, which is normal in a closed network. Lookups will fail until it can.",
+    "errorUpstream": "OSV.dev didn't answer usably. Try again in a moment.",
+    "errorBusy": "Lookups are busy right now. Try again in a moment.",
+    "errorUnreachable": "Couldn't reach the server for this lookup.",
+    "truncated": "OSV.dev reported more advisories than are shown here.",
+    "withdrawn": "Withdrawn",
+    "aliases": "Also known as",
+    "affected": "Affected",
+    "references": "References",
+    "cvss": "CVSS",
+    "published": "Published",
+    "modified": "Modified",
+    "ecosystem": {
+      "npm": "npm",
+      "pypi": "PyPI",
+      "maven": "Maven",
+      "go": "Go",
+      "cargo": "crates.io",
+      "rubygems": "RubyGems",
+      "packagist": "Packagist",
+      "nuget": "NuGet"
+    }
   },
   "newscan": {
     "title": "What do you want to scan?",

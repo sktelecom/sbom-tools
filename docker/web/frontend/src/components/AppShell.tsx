@@ -40,6 +40,13 @@ interface AppShellProps {
   homeHref: string;
   /** Show the logo as a link home (hidden on the Recent home screen itself). */
   showHomeLink?: boolean;
+  /** Hash for the External lookup screen; absent hides the top-bar entry
+   *  point (`capabilities.externalLookup` off, or the static demo). */
+  lookupHref?: string;
+  /** Reset to a blank New scan form, in addition to the `#/new` navigation the
+   *  TopBar/Sidebar links already carry — needed when a scan started from
+   *  `#/new` fails, leaving the hash unchanged (see `NextApp.goToNewScan`). */
+  onNewScan?: () => void;
   /** The active section's content fills the canvas. */
   children: ReactNode;
 }
@@ -67,6 +74,8 @@ export function AppShell({
   onRescan,
   homeHref,
   showHomeLink,
+  lookupHref,
+  onNewScan,
   children,
   version,
 }: AppShellProps) {
@@ -93,9 +102,11 @@ export function AppShell({
         homeHref={homeHref}
         showHomeLink={showHomeLink}
         newHref={newHash()}
+        onNewScan={onNewScan}
         recent={recent}
         onDeleteRecent={onDeleteRecent}
         version={version}
+        lookupHref={lookupHref}
       />
       {IS_STATIC_DEMO && <DemoBanner />}
       <div className="flex min-h-0 flex-1">
@@ -109,6 +120,7 @@ export function AppShell({
             onToggleCollapsed={() => setManualCollapsed(!collapsed)}
             homeHref={homeHref}
             newHref={newHash()}
+            onNewScan={onNewScan}
           />
         )}
         {/* tabIndex makes the scrollable region keyboard-accessible (axe
